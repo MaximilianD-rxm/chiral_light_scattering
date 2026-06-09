@@ -1,4 +1,3 @@
-#Bachelorarbeit, Lichtstreuung in Dipolnäherung 
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,14 +22,14 @@ x3, y3, z3 =  c,  c,  c
 x4, y4, z4 = -c, -c,  c
 
 #Einfallende Welle
-lmbda=1064*10**(-6)
+lmbda=1064*10**(-9)
 k = (2*np.pi)/(lmbda)
 s_x = 0
 s_y = 0
 s_z = 1
 
-pol_mode = "RCP" 
-q_x = -1j/np.sqrt(2)  
+pol_mode = "LCP" 
+q_x = 1j/np.sqrt(2)  
 q_y = -1/np.sqrt(2)
 q_z = 0
 #pol_mode = "RCP" 
@@ -926,7 +925,3 @@ try:
 except RuntimeError:
     print("Konnte keine Isosurface finden.")
 
-#berechnung lin pol an einer kugel, chirale dichte
-#analytische ableitungen für E und H (Modenfunktion)
-#versions controlle github.io
-#verallgemeinern t matrix für erweiterung
