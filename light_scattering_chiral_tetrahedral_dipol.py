@@ -3,10 +3,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from skimage import measure
-from scipy.special import spherical_jn, spherical_yn
+from scipy.special import spherical_jn, spherical_yn, lpmv, factorial
 
 def spherical_hn1(n, z):
     return spherical_jn(n, z) + 1j * spherical_yn(n, z)
+
+def d_spherical_hn1(n, z):
+    return ( n*spherical_hn1(n-1, z) - (n+1) * spherical_hn1(n+1, z) ) / (2*n+1)
+
+def Y_nm(n, m, theta, chi):
+    abs_m = np.abs(m)
+    norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
+        
+    return (-1.0) ** m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
+
 
 #3D Gitter
 res = 111 
@@ -313,12 +323,6 @@ def L(h):
 
 
 
-def Ym1_1(theta, chi):
-    return np.sqrt(3/(8*np.pi)) * np.sin(theta) * np.exp(-1j * chi)
-def Y0_1(theta, chi):
-    return np.sqrt(3/(4*np.pi)) * np.cos(theta)
-def Y1_1(theta, chi):
-    return np.sqrt(3/(8*np.pi)) * np.sin(theta) * np.exp(1j * chi)
 
 
 
@@ -330,22 +334,22 @@ def phase_factor(r, theta, chi):
 
 #Einfallende Welle Y 1x24
 def inc_phi_m1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*(-(np.sqrt(2))/2 *((p_x+1j*p_y)*Y0_1(0, 0))+p_z*Y1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*(-(np.sqrt(2))/2 *((p_x+1j*p_y)*Y_nm(1, 0, 0, 0))+p_z*Y_nm(1, 1, 0, 0))
 
 def inc_phi_0_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * np.pi*np.sqrt(2) * ((p_x+1j*p_y)* Ym1_1(0, 0) - (p_x-1j*p_y)* Y1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * np.pi*np.sqrt(2) * ((p_x+1j*p_y)* Y_nm(1, -1, 0, 0) - (p_x-1j*p_y)* Y_nm(1, 1, 0, 0))
 
 def inc_phi_1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*((np.sqrt(2))/2 *((p_x-1j*p_y)*Y0_1(0, 0))-p_z*Ym1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*((np.sqrt(2))/2 *((p_x-1j*p_y)*Y_nm(1, 0, 0, 0))-p_z*Y_nm(1, -1, 0, 0))
 
 def inc_psi_m1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*(-(np.sqrt(2))/2 *((q_x+1j*q_y)*Y0_1(0, 0))+q_z*Y1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*(-(np.sqrt(2))/2 *((q_x+1j*q_y)*Y_nm(1, 0, 0, 0))+q_z*Y_nm(1, 1, 0, 0))
 
 def inc_psi_0_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-1j*np.pi*np.sqrt(2))/k * ((q_x+1j*q_y)* Ym1_1(0, 0) - (q_x-1j*q_y)* Y1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * (-1j*np.pi*np.sqrt(2))/k * ((q_x+1j*q_y)* Y_nm(1, -1, 0, 0) - (q_x-1j*q_y)* Y_nm(1, 1, 0, 0))
 
 def inc_psi_1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*((np.sqrt(2))/2 *((q_x-1j*q_y)*Y0_1(0, 0))-q_z*Ym1_1(0, 0))
+    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*((np.sqrt(2))/2 *((q_x-1j*q_y)*Y_nm(1, 0, 0, 0))-q_z*Y_nm(1, -1, 0, 0))
 
 def y_q(r_q, theta_q, chi_q):
     arg = (r_q, theta_q, chi_q)
@@ -416,11 +420,11 @@ plt.show()
 
 #Berechnung des Potentials phi(vec(r))
 def S_m1_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Ym1_1(theta_prime_p, chi_prime_p)
+    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, -1, theta_prime_p, chi_prime_p)
 def S_0_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Y0_1(theta_prime_p, chi_prime_p)
+    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, 0, theta_prime_p, chi_prime_p)
 def S_1_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Y1_1(theta_prime_p, chi_prime_p)
+    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, 1, theta_prime_p, chi_prime_p)
 
 X_val=X(h)
 
