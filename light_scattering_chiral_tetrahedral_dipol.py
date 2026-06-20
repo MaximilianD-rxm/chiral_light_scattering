@@ -15,7 +15,7 @@ def Y_nm(n, m, theta, chi):
     abs_m = np.abs(m)
     norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
         
-    return (-1.0) ** m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
+    return (-1.0) ** abs_m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
 
 
 #3D Gitter
@@ -533,63 +533,266 @@ psi_scat_3D = sum([
 
 
 
-#E-Feld
-dx = x_range[1] - x_range[0]
-dy = y_range[1] - y_range[0]
-dz = z_range[1] - z_range[0]
+# Berechnung der Felder
+def dY_nm_dchi(n, m, theta, chi):
+    return 1j * m * Y_nm(n, m, theta, chi)
 
-grad_phi_x, grad_phi_y, grad_phi_z = np.gradient(phi_scat_3D, dx, dy, dz, edge_order=2)
-grad_psi_x, grad_psi_y, grad_psi_z = np.gradient(psi_scat_3D, dx, dy, dz, edge_order=2)
-
-
-# A = ∇φ × r
-A_x = grad_phi_y * Z_grid - grad_phi_z * Y_grid
-A_y = grad_phi_z * X_grid - grad_phi_x * Z_grid
-A_z = grad_phi_x * Y_grid - grad_phi_y * X_grid
-
-# B = ∇ψ × r
-B_x = grad_psi_y * Z_grid - grad_psi_z * Y_grid
-B_y = grad_psi_z * X_grid - grad_psi_x * Z_grid
-B_z = grad_psi_x * Y_grid - grad_psi_y * X_grid
-
-# ∇ × B
-dBx_dx, dBx_dy, dBx_dz = np.gradient(B_x, dx, dy, dz, edge_order=2)
-dBy_dx, dBy_dy, dBy_dz = np.gradient(B_y, dx, dy, dz, edge_order=2)
-dBz_dx, dBz_dy, dBz_dz = np.gradient(B_z, dx, dy, dz, edge_order=2)
-curlB_x = dBz_dy - dBy_dz
-curlB_y = dBx_dz - dBz_dx
-curlB_z = dBy_dx - dBx_dy
-
-Ex_3D = A_x + curlB_x
-Ey_3D = A_y + curlB_y
-Ez_3D = A_z + curlB_z
-
-E_mag_3D = np.sqrt(np.abs(Ex_3D)**2 + np.abs(Ey_3D)**2 + np.abs(Ez_3D)**2)
+def dY_nm_dtheta(n, m, theta, chi):
+    abs_m = np.abs(m)
+    norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
+    A = (n+abs_m)*(n-abs_m+1)
+    dtheta_P_nm = 1/2* lpmv(abs_m+1, n, np.cos(theta))-1/2*A* lpmv(abs_m-1, n, np.cos(theta))
+    
+    return (-1.0) ** abs_m * norm * dtheta_P_nm * np.exp(1j * m * chi)
 
 
+# ∇S_nm
+def grad_S_nm(n, m, r, theta, chi):
+    
+    grad_r = Y_nm(n, m, theta, chi) * k * d_spherical_hn1(n, k*r)
+    
+    grad_t = (1/r) * spherical_hn1(n, k*r) * dY_nm_dtheta(n, m, theta, chi)
+    
+    grad_c = (1/(r*np.sin(theta))) * spherical_hn1(n, k*r) * dY_nm_dchi(n, m, theta, chi)
+    
+    return grad_r, grad_t, grad_c
 
-# H-Feld
-dAx_dx, dAx_dy, dAx_dz = np.gradient(A_x, dx, dy, dz, edge_order=2)
-dAy_dx, dAy_dy, dAy_dz = np.gradient(A_y, dx, dy, dz, edge_order=2)
-dAz_dx, dAz_dy, dAz_dz = np.gradient(A_z, dx, dy, dz, edge_order=2)
 
-curlAx = dAz_dy - dAy_dz
-curlAy = dAx_dz - dAz_dx
-curlAz = dAy_dx - dAx_dy
+# M_nm = ∇S_nm × r
+def M_nm(n, m, r, theta, chi):
+    grad_r, grad_t, grad_c = grad_S_nm(n, m, r, theta, chi)
+    
+    M_nm_r = np.zeros_like(r)
+    M_nm_t = grad_c * r
+    M_nm_c = - grad_t * r
+    
+    return np.array([M_nm_r, M_nm_t, M_nm_c])
 
-Hx_3D = H_konst * (k**2 * B_x + curlAx)
-Hy_3D = H_konst * (k**2 * B_y + curlAy)
-Hz_3D = H_konst * (k**2 * B_z + curlAz)
 
-H_mag_3D = np.sqrt(np.abs(Hx_3D)**2 + np.abs(Hy_3D)**2 + np.abs(Hz_3D)**2)
+# N_nm = ∇ × M_nm
+def N_nm(n, m, r, theta, chi):
+    
+    N_nm_r = (n * (n + 1) / r) * spherical_hn1(n, k*r) * Y_nm(n, m, theta, chi)
+    N_nm_t = (1/r)*dY_nm_dtheta(n, m, theta, chi)*(spherical_hn1(n, k*r) + k*r*d_spherical_hn1(n, k*r))
+    N_nm_c = 1/(r*np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)*(spherical_hn1(n, k*r) + k*r*d_spherical_hn1(n, k*r))
+    
+    return np.array([N_nm_r, N_nm_t, N_nm_c])
+
+
+
+# gestreutes E-Feld
+def E_scat_1(r_prime_1, theta_prime_1, chi_prime_1):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_1, theta_prime_1, chi_prime_1)
+    M_nm_1_0 = M_nm(1, 0, r_prime_1, theta_prime_1, chi_prime_1)
+    M_nm_1_1 = M_nm(1, 1, r_prime_1, theta_prime_1, chi_prime_1)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_1, theta_prime_1, chi_prime_1)
+    N_nm_1_0 = N_nm(1, 0, r_prime_1, theta_prime_1, chi_prime_1)
+    N_nm_1_1 = N_nm(1, 1, r_prime_1, theta_prime_1, chi_prime_1)
+    
+    sum_phi_nm_1 = X_val.flatten()[0]*M_nm_1_m1 + X_val.flatten()[1]*M_nm_1_0 + X_val.flatten()[2]*M_nm_1_1
+    sum_psi_nm_1 = X_val.flatten()[3]*N_nm_1_m1 + X_val.flatten()[4]*N_nm_1_0 + X_val.flatten()[5]*N_nm_1_1
+    
+    E_scat_sph = sum_phi_nm_1 + sum_psi_nm_1
+    E_r, E_theta, E_chi = E_scat_sph[0], E_scat_sph[1], E_scat_sph[2]
+    
+    E_x_1 = E_r * np.sin(theta_prime_1) * np.cos(chi_prime_1) + E_theta * np.cos(theta_prime_1) * np.cos(chi_prime_1) - E_chi * np.sin(chi_prime_1)
+    E_y_1 = E_r * np.sin(theta_prime_1) * np.sin(chi_prime_1) + E_theta * np.cos(theta_prime_1) * np.sin(chi_prime_1) + E_chi * np.cos(chi_prime_1)
+    E_z_1 = E_r * np.cos(theta_prime_1) - E_theta * np.sin(theta_prime_1)
+    
+    return np.array([E_x_1, E_y_1, E_z_1])
+
+
+
+def E_scat_2(r_prime_2, theta_prime_2, chi_prime_2):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_2, theta_prime_2, chi_prime_2)
+    M_nm_1_0 = M_nm(1, 0, r_prime_2, theta_prime_2, chi_prime_2)
+    M_nm_1_1 = M_nm(1, 1, r_prime_2, theta_prime_2, chi_prime_2)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_2, theta_prime_2, chi_prime_2)
+    N_nm_1_0 = N_nm(1, 0, r_prime_2, theta_prime_2, chi_prime_2)
+    N_nm_1_1 = N_nm(1, 1, r_prime_2, theta_prime_2, chi_prime_2)
+    
+    sum_phi_nm_2 = X_val.flatten()[6]*M_nm_1_m1 + X_val.flatten()[7]*M_nm_1_0 + X_val.flatten()[8]*M_nm_1_1
+    sum_psi_nm_2 = X_val.flatten()[9]*N_nm_1_m1 + X_val.flatten()[10]*N_nm_1_0 + X_val.flatten()[11]*N_nm_1_1
+    
+    E_scat_sph = sum_phi_nm_2 + sum_psi_nm_2
+    E_r, E_theta, E_chi = E_scat_sph[0], E_scat_sph[1], E_scat_sph[2]
+    
+    E_x_2 = E_r * np.sin(theta_prime_2) * np.cos(chi_prime_2) + E_theta * np.cos(theta_prime_2) * np.cos(chi_prime_2) - E_chi * np.sin(chi_prime_2)
+    E_y_2 = E_r * np.sin(theta_prime_2) * np.sin(chi_prime_2) + E_theta * np.cos(theta_prime_2) * np.sin(chi_prime_2) + E_chi * np.cos(chi_prime_2)
+    E_z_2 = E_r * np.cos(theta_prime_2) - E_theta * np.sin(theta_prime_2)
+    
+    return np.array([E_x_2, E_y_2, E_z_2])
+
+
+
+def E_scat_3(r_prime_3, theta_prime_3, chi_prime_3):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_3, theta_prime_3, chi_prime_3)
+    M_nm_1_0 = M_nm(1, 0, r_prime_3, theta_prime_3, chi_prime_3)
+    M_nm_1_1 = M_nm(1, 1, r_prime_3, theta_prime_3, chi_prime_3)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_3, theta_prime_3, chi_prime_3)
+    N_nm_1_0 = N_nm(1, 0, r_prime_3, theta_prime_3, chi_prime_3)
+    N_nm_1_1 = N_nm(1, 1, r_prime_3, theta_prime_3, chi_prime_3)
+    
+    sum_phi_nm_3 = X_val.flatten()[12]*M_nm_1_m1 + X_val.flatten()[13]*M_nm_1_0 + X_val.flatten()[14]*M_nm_1_1
+    sum_psi_nm_3 = X_val.flatten()[15]*N_nm_1_m1 + X_val.flatten()[16]*N_nm_1_0 + X_val.flatten()[17]*N_nm_1_1
+    
+    E_scat_sph = sum_phi_nm_3 + sum_psi_nm_3
+    E_r, E_theta, E_chi = E_scat_sph[0], E_scat_sph[1], E_scat_sph[2]
+    
+    E_x_3 = E_r * np.sin(theta_prime_3) * np.cos(chi_prime_3) + E_theta * np.cos(theta_prime_3) * np.cos(chi_prime_3) - E_chi * np.sin(chi_prime_3)
+    E_y_3 = E_r * np.sin(theta_prime_3) * np.sin(chi_prime_3) + E_theta * np.cos(theta_prime_3) * np.sin(chi_prime_3) + E_chi * np.cos(chi_prime_3)
+    E_z_3 = E_r * np.cos(theta_prime_3) - E_theta * np.sin(theta_prime_3)
+    
+    return np.array([E_x_3, E_y_3, E_z_3])
+
+
+
+def E_scat_4(r_prime_4, theta_prime_4, chi_prime_4):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_4, theta_prime_4, chi_prime_4)
+    M_nm_1_0 = M_nm(1, 0, r_prime_4, theta_prime_4, chi_prime_4)
+    M_nm_1_1 = M_nm(1, 1, r_prime_4, theta_prime_4, chi_prime_4)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_4, theta_prime_4, chi_prime_4)
+    N_nm_1_0 = N_nm(1, 0, r_prime_4, theta_prime_4, chi_prime_4)
+    N_nm_1_1 = N_nm(1, 1, r_prime_4, theta_prime_4, chi_prime_4)
+    
+    sum_phi_nm_4 = X_val.flatten()[18]*M_nm_1_m1 + X_val.flatten()[19]*M_nm_1_0 + X_val.flatten()[20]*M_nm_1_1
+    sum_psi_nm_4 = X_val.flatten()[21]*N_nm_1_m1 + X_val.flatten()[22]*N_nm_1_0 + X_val.flatten()[23]*N_nm_1_1
+    
+    E_scat_sph = sum_phi_nm_4 + sum_psi_nm_4
+    E_r, E_theta, E_chi = E_scat_sph[0], E_scat_sph[1], E_scat_sph[2]
+    
+    E_x_4 = E_r * np.sin(theta_prime_4) * np.cos(chi_prime_4) + E_theta * np.cos(theta_prime_4) * np.cos(chi_prime_4) - E_chi * np.sin(chi_prime_4)
+    E_y_4 = E_r * np.sin(theta_prime_4) * np.sin(chi_prime_4) + E_theta * np.cos(theta_prime_4) * np.sin(chi_prime_4) + E_chi * np.cos(chi_prime_4)
+    E_z_4 = E_r * np.cos(theta_prime_4) - E_theta * np.sin(theta_prime_4)
+    
+    return np.array([E_x_4, E_y_4, E_z_4])
+
+
+E_scat = sum([E_scat_1(r_prime_1, theta_prime_1, chi_prime_1),
+         E_scat_2(r_prime_2, theta_prime_2, chi_prime_2),
+         E_scat_3(r_prime_3, theta_prime_3, chi_prime_3),
+         E_scat_4(r_prime_4, theta_prime_4, chi_prime_4)])
+
+
+E_mag_3D = np.sqrt(np.abs(E_scat[0])**2 + np.abs(E_scat[1])**2 + np.abs(E_scat[2])**2)
+
+
+
+
+
+#H-Feld
+def H_scat_1(r_prime_1, theta_prime_1, chi_prime_1):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_1, theta_prime_1, chi_prime_1)
+    M_nm_1_0 = M_nm(1, 0, r_prime_1, theta_prime_1, chi_prime_1)
+    M_nm_1_1 = M_nm(1, 1, r_prime_1, theta_prime_1, chi_prime_1)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_1, theta_prime_1, chi_prime_1)
+    N_nm_1_0 = N_nm(1, 0, r_prime_1, theta_prime_1, chi_prime_1)
+    N_nm_1_1 = N_nm(1, 1, r_prime_1, theta_prime_1, chi_prime_1)
+    
+    sum_psi_nm_1 = X_val.flatten()[3]*M_nm_1_m1 + X_val.flatten()[4]*M_nm_1_0 + X_val.flatten()[5]*M_nm_1_1
+    sum_phi_nm_1 = X_val.flatten()[0]*N_nm_1_m1 + X_val.flatten()[1]*N_nm_1_0 + X_val.flatten()[2]*N_nm_1_1
+    
+    H_scat_sph = H_konst * ( k**2 * sum_psi_nm_1 + sum_phi_nm_1 )
+    H_r, H_theta, H_chi = H_scat_sph[0], H_scat_sph[1], H_scat_sph[2]
+    
+    H_x_1 = H_r * np.sin(theta_prime_1) * np.cos(chi_prime_1) + H_theta * np.cos(theta_prime_1) * np.cos(chi_prime_1) - H_chi * np.sin(chi_prime_1)
+    H_y_1 = H_r * np.sin(theta_prime_1) * np.sin(chi_prime_1) + H_theta * np.cos(theta_prime_1) * np.sin(chi_prime_1) + H_chi * np.cos(chi_prime_1)
+    H_z_1 = H_r * np.cos(theta_prime_1) - H_theta * np.sin(theta_prime_1)
+    
+    return np.array([H_x_1, H_y_1, H_z_1])
+
+
+
+def H_scat_2(r_prime_2, theta_prime_2, chi_prime_2):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_2, theta_prime_2, chi_prime_2)
+    M_nm_1_0 = M_nm(1, 0, r_prime_2, theta_prime_2, chi_prime_2)
+    M_nm_1_1 = M_nm(1, 1, r_prime_2, theta_prime_2, chi_prime_2)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_2, theta_prime_2, chi_prime_2)
+    N_nm_1_0 = N_nm(1, 0, r_prime_2, theta_prime_2, chi_prime_2)
+    N_nm_1_1 = N_nm(1, 1, r_prime_2, theta_prime_2, chi_prime_2)
+    
+    sum_psi_nm_2 = X_val.flatten()[9]*M_nm_1_m1 + X_val.flatten()[10]*M_nm_1_0 + X_val.flatten()[11]*M_nm_1_1
+    sum_phi_nm_2 = X_val.flatten()[6]*N_nm_1_m1 + X_val.flatten()[7]*N_nm_1_0 + X_val.flatten()[8]*N_nm_1_1
+    
+    H_scat_sph = H_konst * ( k**2 * sum_psi_nm_2 + sum_phi_nm_2 )
+    H_r, H_theta, H_chi = H_scat_sph[0], H_scat_sph[1], H_scat_sph[2]
+    
+    H_x_2 = H_r * np.sin(theta_prime_2) * np.cos(chi_prime_2) + H_theta * np.cos(theta_prime_2) * np.cos(chi_prime_2) - H_chi * np.sin(chi_prime_2)
+    H_y_2 = H_r * np.sin(theta_prime_2) * np.sin(chi_prime_2) + H_theta * np.cos(theta_prime_2) * np.sin(chi_prime_2) + H_chi * np.cos(chi_prime_2)
+    H_z_2 = H_r * np.cos(theta_prime_2) - H_theta * np.sin(theta_prime_2)
+    
+    return np.array([H_x_2, H_y_2, H_z_2])
+
+
+
+def H_scat_3(r_prime_3, theta_prime_3, chi_prime_3):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_3, theta_prime_3, chi_prime_3)
+    M_nm_1_0 = M_nm(1, 0, r_prime_3, theta_prime_3, chi_prime_3)
+    M_nm_1_1 = M_nm(1, 1, r_prime_3, theta_prime_3, chi_prime_3)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_3, theta_prime_3, chi_prime_3)
+    N_nm_1_0 = N_nm(1, 0, r_prime_3, theta_prime_3, chi_prime_3)
+    N_nm_1_1 = N_nm(1, 1, r_prime_3, theta_prime_3, chi_prime_3)
+    
+    sum_psi_nm_3 = X_val.flatten()[15]*M_nm_1_m1 + X_val.flatten()[16]*M_nm_1_0 + X_val.flatten()[17]*M_nm_1_1
+    sum_phi_nm_3 = X_val.flatten()[12]*N_nm_1_m1 + X_val.flatten()[13]*N_nm_1_0 + X_val.flatten()[14]*N_nm_1_1
+    
+    H_scat_sph = H_konst * ( k**2 * sum_psi_nm_3 + sum_phi_nm_3 )
+    H_r, H_theta, H_chi = H_scat_sph[0], H_scat_sph[1], H_scat_sph[2]
+    
+    H_x_3 = H_r * np.sin(theta_prime_3) * np.cos(chi_prime_3) + H_theta * np.cos(theta_prime_3) * np.cos(chi_prime_3) - H_chi * np.sin(chi_prime_3)
+    H_y_3 = H_r * np.sin(theta_prime_3) * np.sin(chi_prime_3) + H_theta * np.cos(theta_prime_3) * np.sin(chi_prime_3) + H_chi * np.cos(chi_prime_3)
+    H_z_3 = H_r * np.cos(theta_prime_3) - H_theta * np.sin(theta_prime_3)
+    
+    return np.array([H_x_3, H_y_3, H_z_3])
+
+
+
+def H_scat_4(r_prime_4, theta_prime_4, chi_prime_4):
+    M_nm_1_m1 = M_nm(1, -1, r_prime_4, theta_prime_4, chi_prime_4)
+    M_nm_1_0 = M_nm(1, 0, r_prime_4, theta_prime_4, chi_prime_4)
+    M_nm_1_1 = M_nm(1, 1, r_prime_4, theta_prime_4, chi_prime_4)
+    
+    N_nm_1_m1 = N_nm(1, -1, r_prime_4, theta_prime_4, chi_prime_4)
+    N_nm_1_0 = N_nm(1, 0, r_prime_4, theta_prime_4, chi_prime_4)
+    N_nm_1_1 = N_nm(1, 1, r_prime_4, theta_prime_4, chi_prime_4)
+    
+    sum_psi_nm_4 = X_val.flatten()[21]*M_nm_1_m1 + X_val.flatten()[22]*M_nm_1_0 + X_val.flatten()[23]*M_nm_1_1
+    sum_phi_nm_4 = X_val.flatten()[18]*N_nm_1_m1 + X_val.flatten()[19]*N_nm_1_0 + X_val.flatten()[20]*N_nm_1_1
+    
+    H_scat_sph = H_konst * ( k**2 * sum_psi_nm_4 + sum_phi_nm_4 )
+    H_r, H_theta, H_chi = H_scat_sph[0], H_scat_sph[1], H_scat_sph[2]
+    
+    H_x_4 = H_r * np.sin(theta_prime_4) * np.cos(chi_prime_4) + H_theta * np.cos(theta_prime_4) * np.cos(chi_prime_4) - H_chi * np.sin(chi_prime_4)
+    H_y_4 = H_r * np.sin(theta_prime_4) * np.sin(chi_prime_4) + H_theta * np.cos(theta_prime_4) * np.sin(chi_prime_4) + H_chi * np.cos(chi_prime_4)
+    H_z_4 = H_r * np.cos(theta_prime_4) - H_theta * np.sin(theta_prime_4)
+    
+    return np.array([H_x_4, H_y_4, H_z_4])
+
+
+
+H_scat = sum([H_scat_1(r_prime_1, theta_prime_1, chi_prime_1),
+         H_scat_2(r_prime_2, theta_prime_2, chi_prime_2),
+         H_scat_3(r_prime_3, theta_prime_3, chi_prime_3),
+         H_scat_4(r_prime_4, theta_prime_4, chi_prime_4)])
+
+
+H_mag_3D = np.sqrt(np.abs(H_scat[0])**2 + np.abs(H_scat[1])**2 + np.abs(H_scat[2])**2)
+
 
 
 
 
 # Im(E H*)
-E_dot_H_star = (Ex_3D * np.conj(Hx_3D) +
-                Ey_3D * np.conj(Hy_3D) +
-                Ez_3D * np.conj(Hz_3D))
+E_dot_H_star = (E_scat[0] * np.conj(H_scat[0]) +
+                E_scat[1] * np.conj(H_scat[1]) +
+                E_scat[2] * np.conj(H_scat[2]))
 
 Im_E_dot_H_star = np.imag(E_dot_H_star)
 
