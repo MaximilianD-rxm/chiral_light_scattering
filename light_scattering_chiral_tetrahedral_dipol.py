@@ -5,8 +5,8 @@ from matplotlib.colors import CenteredNorm
 from scipy.special import spherical_jn, spherical_yn, lpmv, factorial
 
 PLOT_XZ = True
-PLOT_YZ = True
-PLOT_DIAGONAL = True
+PLOT_YZ = False
+PLOT_DIAGONAL = False
 
 PLOT_PHI_PSI   = True
 PLOT_E_H       = True
@@ -203,11 +203,11 @@ def dY_nm_dtheta(n, m, theta, chi):
 
 
 #Mie Koeffizienten und T-Matrix
-def inv_T_phi(a_q):
-    return 1/(-1j * (2/3) * (k*a_q)**3)
+def inv_T_phi(a_q):                         # magnetischer Dipol (M_nm)
+    return 1/(-1j * (1/3) * (k*a_q)**3)
 
-def inv_T_psi(a_q):
-    return 1 / (+1j * (1/3) * (k*a_q)**3)
+def inv_T_psi(a_q):                         # elektrischer Dipol (N_nm)
+    return 1 / (+1j * (2/3) * (k*a_q)**3)
 
 def inv_T_q(a_q):
     return np.array([
@@ -220,7 +220,8 @@ def inv_T_q(a_q):
 
 
 
-
+def inv_T_phi_multipol(a_q):
+    return 1/(-1j * (2/3) * (k*a_q)**3)
 
 
 
@@ -642,6 +643,7 @@ Im_E_dot_H_star = np.imag(np.sum(E_tot * np.conj(H_tot), axis=0))
 
 
 
+
 #Maximum der chiralen Dichte berechnen und finden
 abs_Im_E_dot_H = np.abs(Im_E_dot_H_star)
 Im_E_dot_H_star_max = np.max(abs_Im_E_dot_H)
@@ -656,6 +658,8 @@ max_z = Z_grid[idx_x9, idx_y9, idx_z9]
 print(f'max(abs(Im_E_dot_H_star_3D)) = {Im_E_dot_H_star_max} für h = {h}')
 print(f'Ort des Maximums: x = {max_x:.4e}, y = {max_y:.4e}, z = {max_z:.4e}')
 print(f'Zugehörige Gitter-Indizes: [{idx_x9}, {idx_y9}, {idx_z9}]')
+
+
 
 
 
@@ -707,6 +711,8 @@ if PLOT_XZ:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
+        
+        
 
     if PLOT_Im_EH_all:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_inc[:, y_idx, :].T, 
