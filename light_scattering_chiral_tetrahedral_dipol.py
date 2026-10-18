@@ -14,7 +14,7 @@ PLOT_Im_EH_tot = True
 PLOT_Im_EH_all = False
 
 #3D Gitter
-res = 111 
+res = 91
 limit = 4*10**-6
 
 #Streusystem, theta [0, pi], chi [-pi, pi]
@@ -70,7 +70,6 @@ theta1, theta2, theta3, theta4 = theta_i(z1, r1), theta_i(z2, r2), theta_i(z3, r
 chi1, chi2, chi3, chi4 = chi_i(x1, y1), chi_i(x2, y2), chi_i(x3, y3), chi_i(x4, y4)
 
 
-
 #Kugelkoordinaten der Verbindungsvektoren
 def r_pq(x_p, y_p, z_p, x_q, y_q, z_q):
     return np.sqrt((x_q - x_p)**2 + (y_q - y_p)**2 + (z_q - z_p)**2)
@@ -89,6 +88,7 @@ r14 = r_pq(x1, y1, z1, x4, y4, z4)
 r23 = r_pq(x2, y2, z2, x3, y3, z3)
 r24 = r_pq(x2, y2, z2, x4, y4, z4)
 r34 = r_pq(x3, y3, z3, x4, y4, z4)
+
 
 theta12, chi12 = theta_pq(z1, z2, r12), chi_pq(x1, y1, x2, y2)
 theta13, chi13 = theta_pq(z1, z3, r13), chi_pq(x1, y1, x3, y3)
@@ -166,7 +166,7 @@ plot_spherical_vectors([v1, v2, v3, v4])
 
 
 
-#sphärische Hankelfunktion 1.Art und Kugelflächenfunktionen inkl. Ableitungen
+#sphärische Hankelfunktion 1.Art und Kugelflächenfunktionen + Ableitungen
 def spherical_hn1(n, z):
     return spherical_jn(n, z) + 1j * spherical_yn(n, z)
 
@@ -177,7 +177,7 @@ def Y_nm(n, m, theta, chi):
     abs_m = np.abs(m)
     norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
         
-    return (-1.0) ** abs_m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
+    return (-1.0) ** m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
 
 def dY_nm_dchi(n, m, theta, chi):
     return 1j * m * Y_nm(n, m, theta, chi)
@@ -201,13 +201,18 @@ def dY_nm_dtheta(n, m, theta, chi):
 
 
 
+#Mie Koeffizienten und T-Matrix, n = 1
+def inv_T_phi(a_q):
+    Z = spherical_hn1(1, k*a_q)
+    N = spherical_jn(1, k*a_q)
+    return - Z / N
 
-#Mie Koeffizienten und T-Matrix
-def inv_T_phi(a_q):                         # magnetischer Dipol (M_nm)
-    return 1/(-1j * (1/3) * (k*a_q)**3)
 
-def inv_T_psi(a_q):                         # elektrischer Dipol (N_nm)
-    return 1 / (+1j * (2/3) * (k*a_q)**3)
+def inv_T_psi(a_q):
+    Z = spherical_hn1(1, k*a_q)+k*a_q*1/(2*1+1)*(1*spherical_hn1(0, k*a_q)-(1+1)*spherical_hn1(2, k*a_q))
+    N = spherical_jn(1, k*a_q)+k*a_q*1/(2*1+1)*(1*spherical_jn(0, k*a_q)-(1+1)*spherical_jn(2, k*a_q))
+    return - Z / N
+
 
 def inv_T_q(a_q):
     return np.array([
@@ -220,42 +225,54 @@ def inv_T_q(a_q):
 
 
 
-def inv_T_phi_multipol(a_q):
-    return 1/(-1j * (2/3) * (k*a_q)**3)
 
 
 
+#Rotationsmatrix
+def epsilon(m):
+  if m >= 0:
+    return (-1) ** m
+  else:
+    return 1
 
-#Rotationsmatrix (keine Rotation für theta=0, chi=pi/2, phi=0)
-def RotQ(theta_pq, chi_pq, phi_pq):
-    T_m1_m1_1 = np.exp(-1j * chi_pq) * np.exp(1j * (phi_pq+np.pi/2)) * (-np.cos(theta_pq/2)**2)
-    T_0_m1_1 = np.exp(-1j * chi_pq) * (-np.sin(theta_pq) / np.sqrt(2))
-    T_1_m1_1 = np.exp(-1j * chi_pq) * np.exp(-1j * (phi_pq+np.pi/2)) * (-np.sin(theta_pq/2)**2)
+def Hvm_n(theta, v, m, n):
+    eps_m = epsilon(m)
+    eps_v = epsilon(v)
+    const4 = (factorial(n+v) * factorial(n-v) * factorial(n+m) * factorial(n-m))**(1/2)
+    sigma_min = max(0, -(m+v))
+    sigma_max = min(n-m, n-v)
     
-    T_m1_0_1 = np.exp(1j * (phi_pq+np.pi/2)) * (-np.sin(theta_pq) / np.sqrt(2))
-    T_0_0_1 = np.cos(theta_pq)
-    T_1_0_1 = np.exp(-1j * (phi_pq+np.pi/2)) * (np.sin(theta_pq) / np.sqrt(2))
-    
-    T_m1_1_1 = np.exp(1j * chi_pq) * np.exp(1j * (phi_pq+np.pi/2)) * (-np.sin(theta_pq/2)**2)
-    T_0_1_1 = np.exp(1j * chi_pq) * (np.sin(theta_pq) / np.sqrt(2))
-    T_1_1_1 = np.exp(1j * chi_pq) * np.exp(-1j * (phi_pq+np.pi/2)) * (-np.cos(theta_pq/2)**2)  
+    sum_val = 0
+    for sigma in range(sigma_min, sigma_max + 1):
+        Z = (((-1)**(n-sigma)) * 
+        (np.cos(0.5*theta)**(2*sigma+v+m)) * 
+        (np.sin(0.5*theta)**(2*n-2*sigma-v-m)))
+        
+        N = (factorial(sigma) * factorial(n-m-sigma) * factorial(n-v-sigma) * factorial(m+v+sigma))
+        
+        sum_val = sum_val + Z/N
+        
+    return eps_m * eps_v * const4 * sum_val
+
+
+def Tvm_n(theta, phi, chi, v, m, n):
+    return np.exp(1j*m*chi) * np.exp(-1j*v*phi) * Hvm_n(theta, v, m, n)
+
+
+def RotQ(theta_pq, phi_pq, chi_pq):
+    arg = (theta_pq, phi_pq, chi_pq)
     return np.array([
-        [T_m1_m1_1,  T_0_m1_1,  T_1_m1_1],
-        [T_m1_0_1,   T_0_0_1,   T_1_0_1],
-        [T_m1_1_1,   T_0_1_1,   T_1_1_1]])
+        [Tvm_n(*arg, -1, -1, 1), Tvm_n(*arg, -1, 0, 1), Tvm_n(*arg, -1, 1, 1)],
+        [Tvm_n(*arg, 0, -1, 1), Tvm_n(*arg, 0, 0, 1), Tvm_n(*arg, 0, 1, 1)],
+        [Tvm_n(*arg, 1, -1, 1), Tvm_n(*arg, 1, 0, 1), Tvm_n(*arg, 1, 1, 1)]])
 
-#Kontrolle RotQ
-RotQ_test = RotQ(4, 12, 0)
-det = np.linalg.det(RotQ_test)
-print(f"Determinante von RotQ : {det}")
-
-
-def inv_RotQ(theta_pq, chi_pq, phi_pq):
-    return RotQ(theta_pq, chi_pq, phi_pq).conj().T
+def inv_RotQ(theta_pq, phi_pq, chi_pq):
+    return RotQ(theta_pq, phi_pq, chi_pq).conj().T
 
 
 
-#coaxiale Conversion Operatoren 
+
+#coaxiale Conversion Operatoren, Näherung da ohne n-1, n+1 Terme
 def C11_coax(r_pq):
     return np.array([[1, 0, 0], 
                      [0, 1, 0], 
@@ -267,12 +284,12 @@ def C21_pq_coax(r_pq):
                      [0,            0, (1j*r_pq)/2]])
 
 #allgemeine Conversion Operatoren
-def C11_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (theta_pq, chi_pq, phi_pq)
+def C11_pq(r_pq, theta_pq, phi_pq, chi_pq):
+    arg = (theta_pq, phi_pq, chi_pq)
     return inv_RotQ(*arg) @ C11_coax(r_pq) @ RotQ(*arg)
 
-def C21_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (theta_pq, chi_pq, phi_pq)
+def C21_pq(r_pq, theta_pq, phi_pq, chi_pq):
+    arg = (theta_pq, phi_pq, chi_pq)
     return inv_RotQ(*arg) @ C21_pq_coax(r_pq) @ RotQ(*arg)
 
 
@@ -291,13 +308,13 @@ def SR_pq_coax(r_pq):
 
 
 #allgemeine Translationsoperatoren
-def SR_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (theta_pq, chi_pq, phi_pq)
+def SR_pq(r_pq, theta_pq, phi_pq, chi_pq):
+    arg = (theta_pq, phi_pq, chi_pq)
     return inv_RotQ(*arg) @ SR_pq_coax(r_pq) @ RotQ(*arg)
 
 
-def U_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (r_pq, theta_pq, chi_pq, phi_pq)
+def U_pq(r_pq, theta_pq, phi_pq, chi_pq):
+    arg = (r_pq, theta_pq, phi_pq, chi_pq)
     A = C11_pq(*arg) @ SR_pq(*arg)
     B = C21_pq(*arg) @ SR_pq(*arg)
     return np.block([[A, k**2 * B],
@@ -313,34 +330,34 @@ def inv_T3(h):
 def inv_T4(h):
     return inv_T_q(a(h, 4))
 
-U12 = U_pq(r12, theta12, chi12, 0)
-U21 = U_pq(r21, theta21, chi21, 0)
+U12 = U_pq(r12, theta12, 0, chi12)
+U21 = U_pq(r21, theta21, 0, chi21)
 
-U13 = U_pq(r13, theta13, chi13, 0)
-U31 = U_pq(r31, theta31, chi31, 0)
+U13 = U_pq(r13, theta13, 0, chi13)
+U31 = U_pq(r31, theta31, 0, chi31)
 
-U14 = U_pq(r14, theta14, chi14, 0)
-U41 = U_pq(r41, theta41, chi41, 0)
+U14 = U_pq(r14, theta14, 0, chi14)
+U41 = U_pq(r41, theta41, 0, chi41)
 
-U23 = U_pq(r23, theta23, chi23, 0)
-U32 = U_pq(r32, theta32, chi32, 0)
+U23 = U_pq(r23, theta23, 0, chi23)
+U32 = U_pq(r32, theta32, 0, chi32)
 
-U24 = U_pq(r24, theta24, chi24, 0)
-U42 = U_pq(r42, theta42, chi42, 0)
+U24 = U_pq(r24, theta24, 0, chi24)
+U42 = U_pq(r42, theta42, 0, chi42)
 
-U34 = U_pq(r34, theta34, chi34, 0)
-U43 = U_pq(r43, theta43, chi43, 0)
+U34 = U_pq(r34, theta34, 0, chi34)
+U43 = U_pq(r43, theta43, 0, chi43)
 
 
 #Matrix L (24x24)
 def L(h):
-    return np.block([[inv_T1(h), -U12,   -U13,   -U14],
-                     [-U21,   inv_T2(h), -U23,   -U24],
-                     [-U31,   -U32,   inv_T3(h), -U34],
-                     [-U41,   -U42,   -U43,   inv_T4(h)]])
+    return np.block([[inv_T1(h), -U21,   -U31,   -U41],
+                     [-U12,   inv_T2(h), -U32,   -U42],
+                     [-U13,   -U23,   inv_T3(h), -U43],
+                     [-U14,   -U24,   -U34,   inv_T4(h)]])
 
 
-
+ 
 
 
 
@@ -627,8 +644,6 @@ H_tot = H_scat + H_inc
 
 
 
-
-
 #Chirale Dichte Im(E·H*)
 Im_E_dot_H_star_inc = np.imag(np.sum(E_inc * np.conj(H_inc), axis=0))
 
@@ -662,13 +677,34 @@ print(f'Zugehörige Gitter-Indizes: [{idx_x9}, {idx_y9}, {idx_z9}]')
 
 
 
+#Streuamplitude und Wirkungsquerschnitt
+def f_q(z, k, coeffs):
+    phase = np.exp(-1j*k*z)
+    
+    f_x = 1j*1/k*coeffs[0] - 1j*1/k*coeffs[2] - 1j*coeffs[3] - 1j*coeffs[5]
+    f_y = 1/k*coeffs[0] + 1/k*coeffs[2] - coeffs[3] + coeffs[5]
+    f_z = 0
+    
+    return phase * np.sqrt(3/(8*np.pi)) * np.array([f_x, f_y, f_z])
+
+
+
+f = f_q(z1, k, X_flat[0:6]) + f_q(z2, k, X_flat[6:12]) + f_q(z3, k, X_flat[12:18]) + f_q(z4, k, X_flat[18:24])
+f_x, f_y, f_z = f
+
+
+sigma = (4*np.pi)/k * np.imag( np.conj(p_x)*f_x + np.conj(p_y)*f_y + np.conj(p_z)*f_z )
+
+
+print(f'Wirkungsquerschnitt: sigma = {sigma}')
 
 
 
 
 
 
-
+        
+        
 
 #Plotten
 def plot_2d(X, Y, data, title, xlabel, ylabel, cbar_label, cmap='cividis', norm=None, figsize=(6, 4.5)):
