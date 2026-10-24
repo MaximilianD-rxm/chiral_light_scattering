@@ -4,21 +4,19 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import CenteredNorm
 from scipy.special import spherical_jn, spherical_yn, lpmv, factorial
 
-PLOT_XZ = True
-PLOT_YZ = False
-PLOT_DIAGONAL = False
-
-PLOT_PHI_PSI   = True
-PLOT_E_H       = True
-PLOT_Im_EH_tot = True
-PLOT_Im_EH_all = False
+#Plots
+XZ, YZ, DIAGONAL = True, False, False
+PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
 
 #3D Gitter
-res = 91
-limit = 4*10**-6
+res = 51
+limit = 4e-6
+
+#Multipolordnung
+n = 1
 
 #Streusystem, theta [0, pi], chi [-pi, pi]
-c = 1.25*10**-6 
+c = 1.25e-6 
 h = 4
 
 x1, y1, z1 = -c,  c, -c
@@ -27,19 +25,16 @@ x3, y3, z3 =  c,  c,  c
 x4, y4, z4 = -c, -c,  c
 
 def a(h, index):
-    return (30 + (2*h)*(index - 2.5))*10**-9
+    return (30 + (2*h)*(index - 2.5)) * 1e-9
 
 #Einfallende Welle
-lmbda=1064*10**(-9)
-k = (2*np.pi)/(lmbda)
-s_x = 0
-s_y = 0
-s_z = 1
-
 pol_mode = "LCP" 
-q_x = 1j/np.sqrt(2)  
-q_y = -1/np.sqrt(2)
-q_z = 0
+lmbda = 1064e-9
+k = (2*np.pi)/(lmbda)
+s_x, s_y, s_z = 0, 0, 1
+
+R_factor = -1 if pol_mode == "RCP" else 1
+q_x, q_y, q_z = R_factor * 1j/np.sqrt(2), -1/np.sqrt(2), 0
 
 p = np.cross([s_x, s_y, s_z], [q_x, q_y, q_z])
 p_x, p_y, p_z = p
@@ -48,8 +43,8 @@ print('Polarisation:',p_x, p_y, p_z)
 
 
 #Konstanten
-epsilon_0 = 8.854*10**-12
-mu_0 = 4*np.pi*10**-7
+epsilon_0 = 8.8541878188e-12
+mu_0 = 1.25663706127e-6
 c_0 = 299792458
 H_konst=(np.sqrt(epsilon_0*mu_0))/(1j*k*mu_0)
 
@@ -188,7 +183,7 @@ def dY_nm_dtheta(n, m, theta, chi):
     A = (n+abs_m)*(n-abs_m+1)
     dtheta_P_nm = 1/2* lpmv(abs_m+1, n, np.cos(theta))-1/2*A* lpmv(abs_m-1, n, np.cos(theta))
     
-    return (-1.0) ** abs_m * norm * dtheta_P_nm * np.exp(1j * m * chi)
+    return (-1.0)**abs_m * norm * dtheta_P_nm * np.exp(1j * m * chi)
 
 
 
@@ -703,6 +698,68 @@ print(f'Wirkungsquerschnitt: sigma = {sigma}')
 
 
 
+
+#Transformation in gemeinsamen Ursprung, gültig außerhalb des Tetraeders
+def SS00_11(r_pq):
+    return spherical_jn(0, k*r_pq) - 2*spherical_jn(2, k*r_pq)
+def SS11_11(r_pq): 
+    return spherical_jn(0, k*r_pq) + spherical_jn(2, k*r_pq)
+
+def SS_pq_coax(r_pq):
+    return np.array([[SS11_11(r_pq),    0,         0], 
+                     [0,         SS00_11(r_pq),    0], 
+                     [0,                0,   SS11_11(r_pq)]])
+
+
+def SS_pq(r_pq, theta_pq, chi_pq, phi_pq):
+    arg = (theta_pq, chi_pq, phi_pq)
+    return inv_RotQ(*arg) @ SS_pq_coax(r_pq) @ RotQ(*arg)
+
+def V_pq(r_pq, theta_pq, chi_pq, phi_pq):
+    arg = (r_pq, theta_pq, chi_pq, phi_pq)
+    A = C11_pq(*arg) @ SS_pq(*arg)
+    B = C21_pq(*arg) @ SS_pq(*arg)
+    return np.block([[A, k**2 * B],
+                     [B,        A]])
+
+
+
+V =  np.block([[V_pq(r1, np.pi - theta1, chi1 + np.pi, 0), np.zeros((6,6)), np.zeros((6,6)), np.zeros((6,6))],
+      [np.zeros((6,6)), V_pq(r2, np.pi - theta2, chi2 + np.pi, 0), np.zeros((6,6)), np.zeros((6,6))],
+      [np.zeros((6,6)), np.zeros((6,6)), V_pq(r3, np.pi - theta3, chi3 + np.pi, 0), np.zeros((6,6))],
+      [np.zeros((6,6)), np.zeros((6,6)), np.zeros((6,6)), V_pq(r4, np.pi - theta4, chi4 + np.pi, 0)]])
+
+D = V @ X(h)
+
+
+phi_coeff_m1 = D[0] + D[6] + D[12] + D[18]
+phi_coeff_0 = D[1] + D[7] + D[13] + D[19]
+phi_coeff_1 = D[2] + D[8] + D[14] + D[20]
+psi_coeff_m1 = D[3] + D[9] + D[15] + D[21]
+psi_coeff_0 = D[4] + D[10] + D[16] + D[22]
+psi_coeff_1 = D[5] + D[11] + D[17] + D[23]
+
+fernfeld_coeffs = np.array([phi_coeff_m1, phi_coeff_0, phi_coeff_1, psi_coeff_m1, psi_coeff_0, psi_coeff_1])
+
+
+r_safe = np.where(r == 0, 1e-12, r)
+theta_safe = np.clip(theta, 1e-9, np.pi - 1e-9)
+E_fernfeld_scat = E_scat_sphere(r_safe, theta_safe, chi, fernfeld_coeffs)
+E_fernfeld_mag_3D = np.sqrt(np.abs(E_fernfeld_scat[0]) ** 2 + np.abs(E_fernfeld_scat[1]) ** 2 + np.abs(E_fernfeld_scat[2]) ** 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         
         
 
@@ -711,7 +768,7 @@ def plot_2d(X, Y, data, title, xlabel, ylabel, cbar_label, cmap='cividis', norm=
     plt.figure(figsize=figsize)
     plt.title(title, fontsize=12)
     cf = plt.contourf(X, Y, data, levels=400, cmap=cmap, norm=norm)
-    plt.colorbar(cf, label=cbar_label, fraction=0.225, pad=0.03, format='%.2e')   
+    plt.colorbar(cf, label=cbar_label, fraction=0.225, pad=0.03, format='%.4e')   
     plt.xlabel(xlabel, fontsize=12)
     plt.ylabel(ylabel, fontsize=12)
     plt.axis('equal')
@@ -719,13 +776,13 @@ def plot_2d(X, Y, data, title, xlabel, ylabel, cbar_label, cmap='cividis', norm=
 
 
 #Plotten in der x-z-Ebene mit y = 0
-if PLOT_XZ:
+if XZ:
     y_idx = res // 2
     y_xz = y_range[y_idx]
     X_xz, Z_xz = X_grid[:, y_idx, :].T, Z_grid[:, y_idx, :].T
     xl, yl = '$x$ (m)', '$z$ (m)'
     
-    if PLOT_PHI_PSI:
+    if PHI_PSI:
         plot_2d(X_xz, Z_xz, np.abs(phi_scat_3D[:, y_idx, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
@@ -734,23 +791,29 @@ if PLOT_XZ:
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
 
-    if PLOT_E_H:
+    if E_H:
         plot_2d(X_xz, Z_xz, E_mag_3D[:, y_idx, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
+                xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
+        
+        r_xz = r[:, y_idx, :].T
+        mask_z = r_xz < 2*c
+        plot_2d(X_xz, Z_xz, np.ma.masked_where(mask_z, E_fernfeld_mag_3D[:, y_idx, :].T), 
+                fr'{pol_mode}: E-Fernfeld in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
         
         plot_2d(X_xz, Z_xz, H_mag_3D[:, y_idx, :].T, 
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
 
-    if PLOT_Im_EH_tot:
+    if Im_EH_tot:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
         
 
-    if PLOT_Im_EH_all:
+    if Im_EH_all:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_inc[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
@@ -772,13 +835,13 @@ if PLOT_XZ:
 
 
 #Plotten in der y-z-Ebene mit x = 0
-if PLOT_YZ:
+if YZ:
     x_idx = res // 2
     x_yz = x_range[x_idx]
     Y_yz, Z_yz = Y_grid[x_idx, :, :].T, Z_grid[x_idx, :, :].T
     xl, yl = '$y$ (m)', '$z$ (m)'
 
-    if PLOT_PHI_PSI:
+    if PHI_PSI:
         plot_2d(Y_yz, Z_yz, np.abs(phi_scat_3D[x_idx, :, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
@@ -787,7 +850,7 @@ if PLOT_YZ:
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
 
-    if PLOT_E_H:
+    if E_H:
         plot_2d(Y_yz, Z_yz, E_mag_3D[x_idx, :, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
@@ -796,12 +859,12 @@ if PLOT_YZ:
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
 
-    if PLOT_Im_EH_tot:
+    if Im_EH_tot:
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
-    if PLOT_Im_EH_all:
+    if Im_EH_all:
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star_inc[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
@@ -823,7 +886,7 @@ if PLOT_YZ:
 
 
 #Plotten auf der Diagonalebene entlang z mit x=y
-if PLOT_DIAGONAL:
+if DIAGONAL:
     indices = np.arange(res)
     X_diag = X_grid[indices, indices, :].T
     Y_diag = Y_grid[indices, indices, :].T
@@ -832,7 +895,7 @@ if PLOT_DIAGONAL:
     xl, yl = '$d$ (m)', '$z$ (m)'
     fig_sz = (8, 4.5)
 
-    if PLOT_PHI_PSI:
+    if PHI_PSI:
         plot_2d(D_diag, Z_diag, np.abs(phi_scat_3D[indices, indices, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
                 xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis', figsize=fig_sz)
@@ -841,7 +904,7 @@ if PLOT_DIAGONAL:
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
                 xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis', figsize=fig_sz)
 
-    if PLOT_E_H:
+    if E_H:
         plot_2d(D_diag, Z_diag, E_mag_3D[indices, indices, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
                 xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis', figsize=fig_sz)
@@ -849,12 +912,12 @@ if PLOT_DIAGONAL:
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
                 xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis', figsize=fig_sz)
 
-    if PLOT_Im_EH_tot:
+    if Im_EH_tot:
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) (x=y), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
         
-    if PLOT_Im_EH_all:
+    if Im_EH_all:
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star_inc[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) (x=y), h={h}', 
                 xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
