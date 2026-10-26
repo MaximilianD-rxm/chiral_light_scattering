@@ -9,11 +9,17 @@ XZ, YZ, DIAGONAL = True, False, False
 PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
 
 #3D Gitter
-res = 51
+res = 21
 limit = 4e-6
 
 #Multipolordnung
-n = 1
+n_max = 1
+def nm_index(n_max):
+    n = np.concatenate([np.full(2*o+1, o) for o in range(1, n_max+1)])
+    m = np.concatenate([np.arange(-o, o+1) for o in range(1, n_max+1)])
+    return n.reshape(-1, 1), m.reshape(-1, 1)
+coeff_number = [0] + [2*i+1 for i in range(1, n_max+1)]
+coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+1)]
 
 #Streusystem, theta [0, pi], chi [-pi, pi]
 c = 1.25e-6 
@@ -166,7 +172,7 @@ def spherical_hn1(n, z):
     return spherical_jn(n, z) + 1j * spherical_yn(n, z)
 
 def d_spherical_hn1(n, z):
-    return ( n*spherical_hn1(n-1, z) - (n+1) * spherical_hn1(n+1, z) ) / (2*n+1)
+    return (n*spherical_hn1(n-1, z) - (n+1) * spherical_hn1(n+1, z)) / (2*n+1)
 
 def Y_nm(n, m, theta, chi):
     abs_m = np.abs(m)
@@ -196,27 +202,32 @@ def dY_nm_dtheta(n, m, theta, chi):
 
 
 
-#Mie Koeffizienten und T-Matrix, n = 1
-def inv_T_phi(a_q):
-    Z = spherical_hn1(1, k*a_q)
-    N = spherical_jn(1, k*a_q)
-    return - Z / N
+#Mie Koeffizienten und T-Matrix
+def inv_T_coeff(a_q, n, mode):
+    x = k*a_q
+    if mode == "phi":
+        Z = spherical_hn1(n, x)
+        N = spherical_jn(n, x)
+        return - Z / N            
+    elif mode == "psi":
+        Z = spherical_hn1(n, x) + x*d_spherical_hn1(n, x)
+        N = spherical_jn(n, x) + x*spherical_jn(n, x, derivative=True)
+        return - Z / N         
 
 
-def inv_T_psi(a_q):
-    Z = spherical_hn1(1, k*a_q)+k*a_q*1/(2*1+1)*(1*spherical_hn1(0, k*a_q)-(1+1)*spherical_hn1(2, k*a_q))
-    N = spherical_jn(1, k*a_q)+k*a_q*1/(2*1+1)*(1*spherical_jn(0, k*a_q)-(1+1)*spherical_jn(2, k*a_q))
-    return - Z / N
+def inv_T_mode(a_q, n, mode):
+    T0 = np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex)
+    
+    for o in range(1, n + 1):
+        g, f = coeff_sum[o - 1], coeff_sum[o]    
+        T0[g:f, g:f] = np.eye(2*o+1) * inv_T_coeff(a_q, o, mode)
+    return T0
 
 
-def inv_T_q(a_q):
-    return np.array([
-        [inv_T_phi(a_q), 0, 0, 0, 0, 0], 
-        [0, inv_T_phi(a_q), 0, 0, 0, 0], 
-        [0, 0, inv_T_phi(a_q), 0, 0, 0], 
-        [0, 0, 0, inv_T_psi(a_q), 0, 0],
-        [0, 0, 0, 0, inv_T_psi(a_q), 0], 
-        [0, 0, 0, 0, 0, inv_T_psi(a_q)]])
+def inv_T(a_q, n):
+    return np.block([[inv_T_mode(a_q, n, "phi"), np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex)],
+                    [np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex), inv_T_mode(a_q, n, "psi")]])
+
 
 
 
@@ -316,14 +327,6 @@ def U_pq(r_pq, theta_pq, phi_pq, chi_pq):
                      [B,        A]])
 
 
-def inv_T1(h):
-    return inv_T_q(a(h, 1))
-def inv_T2(h):
-    return inv_T_q(a(h, 2))
-def inv_T3(h):
-    return inv_T_q(a(h, 3))
-def inv_T4(h):
-    return inv_T_q(a(h, 4))
 
 U12 = U_pq(r12, theta12, 0, chi12)
 U21 = U_pq(r21, theta21, 0, chi21)
@@ -344,54 +347,69 @@ U34 = U_pq(r34, theta34, 0, chi34)
 U43 = U_pq(r43, theta43, 0, chi43)
 
 
+
 #Matrix L (24x24)
 def L(h):
-    return np.block([[inv_T1(h), -U21,   -U31,   -U41],
-                     [-U12,   inv_T2(h), -U32,   -U42],
-                     [-U13,   -U23,   inv_T3(h), -U43],
-                     [-U14,   -U24,   -U34,   inv_T4(h)]])
+    return np.block([[inv_T(a(h, 1), n_max),       -U21,       -U31,       -U41],
+                     [      -U12, inv_T(a(h, 2), n_max),       -U32,       -U42],
+                     [      -U13,       -U23, inv_T(a(h, 3), n_max),       -U43],
+                     [      -U14,       -U24,       -U34, inv_T(a(h, 4), n_max)]])
 
 
  
 
 
 
+
+
+#Einfallende Welle Y für s = e_z
+def c_nm(n, m):
+    bed = (m >= -n) & (m <= n)
+    rad = np.where(bed, (n - m)*(n + m + 1), 0).astype(float)
+    val = np.sqrt(rad)
+    return np.where(m >= 0, val, -val)
+        
+def phi_nm_inc(n, m):
+    A = - (4*np.pi*1j**(n+1))/(n*(n+1))
+    B1 = (p_x + 1j*p_y) * c_nm(n, m) * Y_nm(n, -m-1, 0, 0)
+    B2 = (p_x - 1j*p_y) * c_nm(n, m-1) * Y_nm(n, -m+1, 0, 0)
+    B3 = m * p_z * Y_nm(n, -m, 0, 0)
+    return A * ( 1/2 * (B1 + B2) - B3 )
+
+def psi_nm_inc(n, m):
+    A = - (4*np.pi*1j**n)/(n*(n+1)*k)
+    B1 = (q_x + 1j*q_y) * c_nm(n, m) * Y_nm(n, -m-1, 0, 0)
+    B2 = (q_x - 1j*q_y) * c_nm(n, m-1) * Y_nm(n, -m+1, 0, 0)
+    B3 = m * q_z * Y_nm(n, -m, 0, 0)
+    return A * ( 1/2 * (B1 + B2) - B3 )
+
+
+
+
+def Y_phi(n):
+    n, m = nm_index(n)
+    return phi_nm_inc(n, m)
+def Y_psi(n):
+    n, m = nm_index(n)
+    return psi_nm_inc(n, m)
+
+
+y_q = np.concatenate([Y_phi(n_max), Y_psi(n_max)])
+
+
+
+#Phasenfaktor 1 im globalen Ursprung
 def phase_factor(r, theta, chi):
     x = r * np.sin(theta) * np.cos(chi)
     y = r * np.sin(theta) * np.sin(chi)
     z = r * np.cos(theta)
     return np.exp(1j * k * (s_x * x + s_y * y + s_z * z))
 
-#Einfallende Welle Y 1x24
-def inc_phi_m1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*(-(np.sqrt(2))/2 *((p_x+1j*p_y)*Y_nm(1, 0, 0, 0))+p_z*Y_nm(1, 1, 0, 0))
+Y = np.block([[phase_factor(r1, theta1, chi1) * y_q],
+              [phase_factor(r2, theta2, chi2) * y_q],
+              [phase_factor(r3, theta3, chi3) * y_q],
+              [phase_factor(r4, theta4, chi4) * y_q]])
 
-def inc_phi_0_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * np.pi*np.sqrt(2) * ((p_x+1j*p_y)* Y_nm(1, -1, 0, 0) - (p_x-1j*p_y)* Y_nm(1, 1, 0, 0))
-
-def inc_phi_1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * 2*np.pi*((np.sqrt(2))/2 *((p_x-1j*p_y)*Y_nm(1, 0, 0, 0))-p_z*Y_nm(1, -1, 0, 0))
-
-def inc_psi_m1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*(-(np.sqrt(2))/2 *((q_x+1j*q_y)*Y_nm(1, 0, 0, 0))+q_z*Y_nm(1, 1, 0, 0))
-
-def inc_psi_0_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-1j*np.pi*np.sqrt(2))/k * ((q_x+1j*q_y)* Y_nm(1, -1, 0, 0) - (q_x-1j*q_y)* Y_nm(1, 1, 0, 0))
-
-def inc_psi_1_1(r_q, theta_q, chi_q):
-    return phase_factor(r_q, theta_q, chi_q) * (-2*np.pi*1j)/k*((np.sqrt(2))/2 *((q_x-1j*q_y)*Y_nm(1, 0, 0, 0))-q_z*Y_nm(1, -1, 0, 0))
-
-def y_q(r_q, theta_q, chi_q):
-    arg = (r_q, theta_q, chi_q)
-    return np.array([[inc_phi_m1_1(*arg)], [inc_phi_0_1(*arg)], [inc_phi_1_1(*arg)],
-                   [inc_psi_m1_1(*arg)], [inc_psi_0_1(*arg)], [inc_psi_1_1(*arg)]], dtype=complex)
-
-
-#Phasenfaktor 1 im Ursprung
-Y = np.block([[y_q(r1, theta1, chi1)],
-              [y_q(r2, theta2, chi2)],
-              [y_q(r3, theta3, chi3)],
-              [y_q(r4, theta4, chi4)]])
 
 
 
