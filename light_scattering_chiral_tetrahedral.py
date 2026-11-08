@@ -9,18 +9,15 @@ XZ, YZ, DIAGONAL = True, False, False
 PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
 
 #3D Gitter
-res = 21
+res = 51
 limit = 4e-6
 
 #Multipolordnung
 n_max = 1
-def nm_index(n_max):
-    n = np.concatenate([np.full(2*o+1, o) for o in range(1, n_max+1)])
-    m = np.concatenate([np.arange(-o, o+1) for o in range(1, n_max+1)])
-    return n.reshape(-1, 1), m.reshape(-1, 1)
-coeff_number = [0] + [2*i+1 for i in range(1, n_max+1)]
-coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+1)]
-
+coeff_number = [0] + [2*i+1 for i in range(1, n_max+2)]
+coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+2)]
+print(coeff_number)
+print(coeff_sum)
 #Streusystem, theta [0, pi], chi [-pi, pi]
 c = 1.25e-6 
 h = 4
@@ -203,60 +200,56 @@ def dY_nm_dtheta(n, m, theta, chi):
 
 
 #Mie Koeffizienten und T-Matrix
-def inv_T_coeff(a_q, n, mode):
-    x = k*a_q
-    if mode == "phi":
-        Z = spherical_hn1(n, x)
-        N = spherical_jn(n, x)
-        return - Z / N            
-    elif mode == "psi":
-        Z = spherical_hn1(n, x) + x*d_spherical_hn1(n, x)
-        N = spherical_jn(n, x) + x*spherical_jn(n, x, derivative=True)
-        return - Z / N         
-
-
-def inv_T_mode(a_q, n, mode):
-    T0 = np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex)
+def inv_T(a_q, n):
+    x = k * a_q
+    size = coeff_sum[n]
+    T = np.zeros((2*size, 2*size), dtype=complex)
     
     for o in range(1, n + 1):
-        g, f = coeff_sum[o - 1], coeff_sum[o]    
-        T0[g:f, g:f] = np.eye(2*o+1) * inv_T_coeff(a_q, o, mode)
-    return T0
-
-
-def inv_T(a_q, n):
-    return np.block([[inv_T_mode(a_q, n, "phi"), np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex)],
-                    [np.zeros((coeff_sum[n], coeff_sum[n]), dtype=complex), inv_T_mode(a_q, n, "psi")]])
-
-
+        g, f = coeff_sum[o-1], coeff_sum[o]
+        dim = 2*o + 1
+        
+        Z_phi = spherical_hn1(o, x)
+        N_phi = spherical_jn(o, x)
+        inv_T_phi = - Z_phi / N_phi
+        
+        Z_psi = spherical_hn1(o, x) + x * d_spherical_hn1(o, x)
+        N_psi = spherical_jn(o, x) + x * spherical_jn(o, x, derivative=True)
+        inv_T_psi = - Z_psi / N_psi
+        
+        T[g:f, g:f] = np.eye(dim) * inv_T_phi
+        T[g+size:f+size, g+size:f+size] = np.eye(dim) * inv_T_psi
+        
+    return T
 
 
 
 
 
 #Rotationsmatrix
-def epsilon(m):
-  if m >= 0:
-    return (-1) ** m
-  else:
-    return 1
-
 def Hvm_n(theta, v, m, n):
-    eps_m = epsilon(m)
-    eps_v = epsilon(v)
+    eps_m = np.where(m >= 0, (-1.0)**m, 1)
+    eps_v = np.where(v >= 0, (-1.0)**v, 1)
     const4 = (factorial(n+v) * factorial(n-v) * factorial(n+m) * factorial(n-m))**(1/2)
-    sigma_min = max(0, -(m+v))
-    sigma_max = min(n-m, n-v)
+    sum_val = np.zeros_like(v, dtype=float)
     
-    sum_val = 0
-    for sigma in range(sigma_min, sigma_max + 1):
+    sigma_min = np.maximum(0, -(m+v))
+    sigma_max = np.minimum(n-m, n-v)
+    
+    for sigma in range(0, 2*n+1):
+
+        valid = (sigma >= sigma_min) & (sigma <= sigma_max)
+        
+        if not np.any(valid):
+            continue
+
         Z = (((-1)**(n-sigma)) * 
         (np.cos(0.5*theta)**(2*sigma+v+m)) * 
         (np.sin(0.5*theta)**(2*n-2*sigma-v-m)))
         
         N = (factorial(sigma) * factorial(n-m-sigma) * factorial(n-v-sigma) * factorial(m+v+sigma))
-        
-        sum_val = sum_val + Z/N
+        N = np.where(valid, N, 1.0)
+        sum_val = sum_val + np.where(valid, Z/N, 0.0)
         
     return eps_m * eps_v * const4 * sum_val
 
@@ -265,90 +258,194 @@ def Tvm_n(theta, phi, chi, v, m, n):
     return np.exp(1j*m*chi) * np.exp(-1j*v*phi) * Hvm_n(theta, v, m, n)
 
 
-def RotQ(theta_pq, phi_pq, chi_pq):
-    arg = (theta_pq, phi_pq, chi_pq)
-    return np.array([
-        [Tvm_n(*arg, -1, -1, 1), Tvm_n(*arg, -1, 0, 1), Tvm_n(*arg, -1, 1, 1)],
-        [Tvm_n(*arg, 0, -1, 1), Tvm_n(*arg, 0, 0, 1), Tvm_n(*arg, 0, 1, 1)],
-        [Tvm_n(*arg, 1, -1, 1), Tvm_n(*arg, 1, 0, 1), Tvm_n(*arg, 1, 1, 1)]])
+def RotQ(theta_pq, phi_pq, chi_pq, n_max):
+    size = coeff_sum[n_max]
+    Rot_Q = np.zeros((size, size), dtype=complex)
+    
+    for n in range(1, n_max + 1):
+        g, f = coeff_sum[n-1], coeff_sum[n]
+        indices = np.arange(-n, n + 1)
+        
+        v, m = np.meshgrid(indices, indices, indexing='ij')
+        
+        Rot_Q[g:f, g:f] = Tvm_n(theta_pq, phi_pq, chi_pq, v, m, n)
 
-def inv_RotQ(theta_pq, phi_pq, chi_pq):
-    return RotQ(theta_pq, phi_pq, chi_pq).conj().T
+    return Rot_Q
+
+
+def inv_RotQ(theta_pq, phi_pq, chi_pq, n_max):
+    return RotQ(theta_pq, phi_pq, chi_pq, n_max).conj().T
 
 
 
 
-#coaxiale Conversion Operatoren, Näherung da ohne n-1, n+1 Terme
-def C11_coax(r_pq):
-    return np.array([[1, 0, 0], 
-                     [0, 1, 0], 
-                     [0, 0, 1]])
 
-def C21_pq_coax(r_pq):
-    return np.array([[(-1j*r_pq)/2, 0,         0], 
-                     [0,    	    0,         0], 
-                     [0,            0, (1j*r_pq)/2]])
 
-#allgemeine Conversion Operatoren
-def C11_pq(r_pq, theta_pq, phi_pq, chi_pq):
-    arg = (theta_pq, phi_pq, chi_pq)
-    return inv_RotQ(*arg) @ C11_coax(r_pq) @ RotQ(*arg)
 
-def C21_pq(r_pq, theta_pq, phi_pq, chi_pq):
-    arg = (theta_pq, phi_pq, chi_pq)
-    return inv_RotQ(*arg) @ C21_pq_coax(r_pq) @ RotQ(*arg)
+
 
 
 
 
 #coaxiale Translationsoperatoren
-def SR00_11(r_pq):
-    return spherical_hn1(0, k*r_pq) - 2*spherical_hn1(2, k*r_pq)
-def SR11_11(r_pq): 
-    return spherical_hn1(0, k*r_pq) + spherical_hn1(2, k*r_pq)
+def a_nm(n, m):
+    cond = n >= np.abs(m)
+    m = np.where(cond, m, 0)
+    val = np.sqrt(((n + 1 + np.abs(m))*(n + 1 - np.abs(m)))/((2*n + 1)*(2*n + 3)))
+    
+    return np.where(cond, val, 0)
 
-def SR_pq_coax(r_pq):
-    return np.array([[SR11_11(r_pq),    0,         0], 
-                     [0,         SR00_11(r_pq),    0], 
-                     [0,                0,   SR11_11(r_pq)]])
+def b_nm(n, m):
+    cond1 = n >= np.abs(m)
+    m = np.where(cond1, m, 0)
+    cond2 = m >= 0
+    sqrt = np.sqrt(((n - m - 1)*(n - m))/((2*n - 1)*(2*n + 1)))
+    val = np.where(cond2, sqrt, -sqrt)
+    
+    return np.where(cond1, val, 0)
+
+# 3D-Array C[m, l, n] der koaxialen Translationskoeffizienten m, l, n ∈ 0, 1, ... n_max+1
+def SR_coax_coeff(r_pq, n_max):
+    lim = n_max + 1
+    C = np.zeros((lim + 1, 2*lim + 1, lim + 1), dtype=complex)
+ 
+    l = np.arange(2*lim + 1)
+    C[0, :, 0] = (-1.0) ** l * np.sqrt(2 * l + 1) * spherical_hn1(l, k * r_pq)
+ 
+    for m in range(0, lim):
+            l_m = np.arange(m+1, 2*lim - m)
+            C[m+1, l_m, m+1] = (b_nm(l_m, -m-1) * C[m, l_m-1, m] - b_nm(l_m+1, m) * C[m, l_m+1, m]) / b_nm(m+1, -m-1)
+ 
+        
+            for n in range(m, lim):
+                l_n = np.arange(m, 2*lim - n)
+                C[m, l_n, n + 1] = (a_nm(l_n, m)*C[m, l_n+1, n] - a_nm(l_n-1, m)*C[m, l_n-1, n] - a_nm(n-1, m)*C[m, l_n, n-1]) / -a_nm(n, m)
+ 
+    return C[:, : lim + 1, :]
+
+# 2D-Matrix der korrekt angeordneten koaxialen Translationskoeffizienten (Dimension: coeff_sum[n_max+1]+1 x coeff_sum[n_max])
+def SR_pq_coax(r_pq, n_max):
+    C = SR_coax_coeff(r_pq, n_max)
+    SR = np.zeros((coeff_sum[n_max+1], coeff_sum[n_max+1]), dtype=complex)
+    
+    for n in range(1, n_max+2):
+        s = list(range(n+1))
+        s_array = np.asarray(s)
+        g, f = coeff_sum[n-1], coeff_sum[n]
+        abs_m = np.concatenate([np.arange(n, -1, -1), np.arange(1, n + 1)])
+        diag_elements = np.array([C[val, n, n] for val in abs_m])
+        SR[g:f, g:f] = np.diag(diag_elements)
+      
+        for j in range(1, n):
+            g2, f2 = 0, coeff_number[j]
+            abs_m2 = np.concatenate([np.arange(j, -1, -1), np.arange(1, j+1)])
+            elements_jn = np.array([C[val, j, n] for val in s_array[abs_m2]])
+            elements_nj = np.array([C[val, n, j] for val in s_array[abs_m2]])
+            SR[g2+coeff_sum[j-1]:f2+coeff_sum[j-1], g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j] = np.diag(elements_jn)
+            SR[g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j, g2+coeff_sum[j-1]:f2+coeff_sum[j-1]] = np.diag(elements_nj)
+      
+    row0 = np.zeros(coeff_sum[n_max], dtype=complex)
+    n_0 = np.arange(1, n_max + 1)
+    row0[np.asarray(coeff_sum[:n_max]) + n_0] = C[0, 0, 1:n_max + 1]
+    
+    return np.vstack([row0, SR[:, :coeff_sum[n_max]]])
 
 
-#allgemeine Translationsoperatoren
-def SR_pq(r_pq, theta_pq, phi_pq, chi_pq):
-    arg = (theta_pq, phi_pq, chi_pq)
-    return inv_RotQ(*arg) @ SR_pq_coax(r_pq) @ RotQ(*arg)
-
-
-def U_pq(r_pq, theta_pq, phi_pq, chi_pq):
-    arg = (r_pq, theta_pq, phi_pq, chi_pq)
-    A = C11_pq(*arg) @ SR_pq(*arg)
-    B = C21_pq(*arg) @ SR_pq(*arg)
-    return np.block([[A, k**2 * B],
-                     [B,        A]])
 
 
 
-U12 = U_pq(r12, theta12, 0, chi12)
-U21 = U_pq(r21, theta21, 0, chi21)
-
-U13 = U_pq(r13, theta13, 0, chi13)
-U31 = U_pq(r31, theta31, 0, chi31)
-
-U14 = U_pq(r14, theta14, 0, chi14)
-U41 = U_pq(r41, theta41, 0, chi41)
-
-U23 = U_pq(r23, theta23, 0, chi23)
-U32 = U_pq(r32, theta32, 0, chi32)
-
-U24 = U_pq(r24, theta24, 0, chi24)
-U42 = U_pq(r42, theta42, 0, chi42)
-
-U34 = U_pq(r34, theta34, 0, chi34)
-U43 = U_pq(r43, theta43, 0, chi43)
 
 
 
-#Matrix L (24x24)
+# Koaxiale Konversionsmatrix (Dimension: 2*coeff_sum[n_max] x 2*coeff_sum[n_max+1]+2)
+def C_21_coax(r_pq, n_max):
+    
+    size_quad = coeff_sum[n_max]
+    C_21 = np.zeros((size_quad, size_quad), dtype=complex)
+    
+    for n in range(1, n_max + 1):
+        g, f = coeff_sum[n-1], coeff_sum[n]
+        m = np.arange(-n, n + 1)
+        
+        A = (1j * m * r_pq) / (n * (n + 1))
+        C_21[g:f, g:f] = np.diag(A)
+    
+    column_0 = np.zeros((coeff_sum[n_max], 1), dtype=complex)
+    column_max = np.zeros((coeff_sum[n_max], coeff_number[n_max + 1]), dtype=complex)
+    
+    return np.hstack([column_0, C_21, column_max])
+
+
+
+def C_11_coax(r_pq, n_max):
+    
+    C_11 = np.zeros((coeff_sum[n_max+1], coeff_sum[n_max+1]), dtype=complex)
+    
+    for n in range(1, n_max+1):
+        g, f = coeff_sum[n-1], coeff_sum[n]
+        m = np.arange(-n, n + 1)
+        C_11[g:f, g:f] = np.eye(coeff_number[n])
+        
+        B = (a_nm(n, m) * k * r_pq)/(n+1)
+        C_11[g:f, g+coeff_number[n]+1:f+coeff_number[n]+1] = np.diag(B)
+        
+        C = (a_nm(n, m) * k * r_pq)/(n+1)
+        C_11[g+coeff_number[n]+1:f+coeff_number[n]+1, g:f] = np.diag(C)
+    
+    column_0 = np.zeros((coeff_sum[n_max], 1), dtype=complex)
+    column_0[1, 0] = (a_nm(0, 0) * k * r_pq)/(1)
+    
+    return np.hstack([column_0, C_11[:coeff_sum[n_max],:]])
+
+
+
+
+
+def U_pq(r_pq, theta_pq, phi_pq, chi_pq, n_max):
+    
+    C_coax = np.block([[C_11_coax(r_pq, n_max), k**2 * C_21_coax(r_pq, n_max)],
+                       [C_21_coax(r_pq, n_max),        C_11_coax(r_pq, n_max)]])
+    
+    SR_coax = np.block([[SR_pq_coax(r_pq, n_max), np.zeros_like(SR_pq_coax(r_pq, n_max))],
+                        [np.zeros_like(SR_pq_coax(r_pq, n_max)), SR_pq_coax(r_pq, n_max)]])
+    
+    inv_RotQ1 = np.block([[inv_RotQ(theta_pq, phi_pq, chi_pq, n_max), np.zeros_like(inv_RotQ(theta_pq, phi_pq, chi_pq, n_max))],
+                        [np.zeros_like(inv_RotQ(theta_pq, phi_pq, chi_pq, n_max)), inv_RotQ(theta_pq, phi_pq, chi_pq, n_max)]])
+    
+    RotQ1 = np.block([[RotQ(theta_pq, phi_pq, chi_pq, n_max), np.zeros_like(RotQ(theta_pq, phi_pq, chi_pq, n_max))],
+                        [np.zeros_like(RotQ(theta_pq, phi_pq, chi_pq, n_max)), RotQ(theta_pq, phi_pq, chi_pq, n_max)]])
+    
+    
+    return inv_RotQ1 @ C_coax @ SR_coax @ RotQ1
+
+
+
+
+
+
+
+
+U12 = U_pq(r12, theta12, 0, chi12, n_max)
+U21 = U_pq(r21, theta21, 0, chi21, n_max)
+
+U13 = U_pq(r13, theta13, 0, chi13, n_max)
+U31 = U_pq(r31, theta31, 0, chi31, n_max)
+
+U14 = U_pq(r14, theta14, 0, chi14, n_max)
+U41 = U_pq(r41, theta41, 0, chi41, n_max)
+
+U23 = U_pq(r23, theta23, 0, chi23, n_max)
+U32 = U_pq(r32, theta32, 0, chi32, n_max)
+
+U24 = U_pq(r24, theta24, 0, chi24, n_max)
+U42 = U_pq(r42, theta42, 0, chi42, n_max)
+
+U34 = U_pq(r34, theta34, 0, chi34, n_max)
+U43 = U_pq(r43, theta43, 0, chi43, n_max)
+
+
+
+#Matrix L
 def L(h):
     return np.block([[inv_T(a(h, 1), n_max),       -U21,       -U31,       -U41],
                      [      -U12, inv_T(a(h, 2), n_max),       -U32,       -U42],
@@ -364,37 +461,35 @@ def L(h):
 
 #Einfallende Welle Y für s = e_z
 def c_nm(n, m):
-    bed = (m >= -n) & (m <= n)
-    rad = np.where(bed, (n - m)*(n + m + 1), 0).astype(float)
+    cond = (m >= -n) & (m <= n)
+    rad = np.where(cond, (n - m)*(n + m + 1), 0).astype(float)
     val = np.sqrt(rad)
     return np.where(m >= 0, val, -val)
+
+def nm_index(n_max):
+    n = np.concatenate([np.full(2*o+1, o) for o in range(1, n_max+1)])
+    m = np.concatenate([np.arange(-o, o+1) for o in range(1, n_max+1)])
+    return n.reshape(-1, 1), m.reshape(-1, 1)
         
-def phi_nm_inc(n, m):
-    A = - (4*np.pi*1j**(n+1))/(n*(n+1))
-    B1 = (p_x + 1j*p_y) * c_nm(n, m) * Y_nm(n, -m-1, 0, 0)
-    B2 = (p_x - 1j*p_y) * c_nm(n, m-1) * Y_nm(n, -m+1, 0, 0)
-    B3 = m * p_z * Y_nm(n, -m, 0, 0)
-    return A * ( 1/2 * (B1 + B2) - B3 )
-
-def psi_nm_inc(n, m):
-    A = - (4*np.pi*1j**n)/(n*(n+1)*k)
-    B1 = (q_x + 1j*q_y) * c_nm(n, m) * Y_nm(n, -m-1, 0, 0)
-    B2 = (q_x - 1j*q_y) * c_nm(n, m-1) * Y_nm(n, -m+1, 0, 0)
-    B3 = m * q_z * Y_nm(n, -m, 0, 0)
-    return A * ( 1/2 * (B1 + B2) - B3 )
-
-
-
-
-def Y_phi(n):
+def y_q_inc(n):
     n, m = nm_index(n)
-    return phi_nm_inc(n, m)
-def Y_psi(n):
-    n, m = nm_index(n)
-    return psi_nm_inc(n, m)
 
+    c_1 = c_nm(n, m)
+    c_2 = c_nm(n, m-1)
+    Y_1 = Y_nm(n, -m-1, 0, 0)
+    Y_2 = Y_nm(n, -m+1, 0, 0)
+    Y_3 = Y_nm(n, -m, 0, 0)
 
-y_q = np.concatenate([Y_phi(n_max), Y_psi(n_max)])
+    A_phi = - (4*np.pi*1j**(n+1))/(n*(n+1))
+    y_phi = A_phi * (1/2 *((p_x + 1j*p_y)*c_1*Y_1 + (p_x - 1j*p_y)*c_2*Y_2) - (m * p_z * Y_3))
+
+    A_psi = - (4*np.pi*1j**n)/(n*(n+1)*k)
+    y_psi = A_psi * (1/2 *((q_x + 1j*q_y)*c_1*Y_1 + (q_x - 1j*q_y)*c_2*Y_2) - (m * q_z * Y_3))
+
+    return np.concatenate([y_phi, y_psi])
+
+y_q = y_q_inc(n_max)
+
 
 
 
@@ -717,56 +812,6 @@ print(f'Wirkungsquerschnitt: sigma = {sigma}')
 
 
 
-#Transformation in gemeinsamen Ursprung, gültig außerhalb des Tetraeders
-def SS00_11(r_pq):
-    return spherical_jn(0, k*r_pq) - 2*spherical_jn(2, k*r_pq)
-def SS11_11(r_pq): 
-    return spherical_jn(0, k*r_pq) + spherical_jn(2, k*r_pq)
-
-def SS_pq_coax(r_pq):
-    return np.array([[SS11_11(r_pq),    0,         0], 
-                     [0,         SS00_11(r_pq),    0], 
-                     [0,                0,   SS11_11(r_pq)]])
-
-
-def SS_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (theta_pq, chi_pq, phi_pq)
-    return inv_RotQ(*arg) @ SS_pq_coax(r_pq) @ RotQ(*arg)
-
-def V_pq(r_pq, theta_pq, chi_pq, phi_pq):
-    arg = (r_pq, theta_pq, chi_pq, phi_pq)
-    A = C11_pq(*arg) @ SS_pq(*arg)
-    B = C21_pq(*arg) @ SS_pq(*arg)
-    return np.block([[A, k**2 * B],
-                     [B,        A]])
-
-
-
-V =  np.block([[V_pq(r1, np.pi - theta1, chi1 + np.pi, 0), np.zeros((6,6)), np.zeros((6,6)), np.zeros((6,6))],
-      [np.zeros((6,6)), V_pq(r2, np.pi - theta2, chi2 + np.pi, 0), np.zeros((6,6)), np.zeros((6,6))],
-      [np.zeros((6,6)), np.zeros((6,6)), V_pq(r3, np.pi - theta3, chi3 + np.pi, 0), np.zeros((6,6))],
-      [np.zeros((6,6)), np.zeros((6,6)), np.zeros((6,6)), V_pq(r4, np.pi - theta4, chi4 + np.pi, 0)]])
-
-D = V @ X(h)
-
-
-phi_coeff_m1 = D[0] + D[6] + D[12] + D[18]
-phi_coeff_0 = D[1] + D[7] + D[13] + D[19]
-phi_coeff_1 = D[2] + D[8] + D[14] + D[20]
-psi_coeff_m1 = D[3] + D[9] + D[15] + D[21]
-psi_coeff_0 = D[4] + D[10] + D[16] + D[22]
-psi_coeff_1 = D[5] + D[11] + D[17] + D[23]
-
-fernfeld_coeffs = np.array([phi_coeff_m1, phi_coeff_0, phi_coeff_1, psi_coeff_m1, psi_coeff_0, psi_coeff_1])
-
-
-r_safe = np.where(r == 0, 1e-12, r)
-theta_safe = np.clip(theta, 1e-9, np.pi - 1e-9)
-E_fernfeld_scat = E_scat_sphere(r_safe, theta_safe, chi, fernfeld_coeffs)
-E_fernfeld_mag_3D = np.sqrt(np.abs(E_fernfeld_scat[0]) ** 2 + np.abs(E_fernfeld_scat[1]) ** 2 + np.abs(E_fernfeld_scat[2]) ** 2)
-
-
-
 
 
 
@@ -814,11 +859,6 @@ if XZ:
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
                 xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
         
-        r_xz = r[:, y_idx, :].T
-        mask_z = r_xz < 2*c
-        plot_2d(X_xz, Z_xz, np.ma.masked_where(mask_z, E_fernfeld_mag_3D[:, y_idx, :].T), 
-                fr'{pol_mode}: E-Fernfeld in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
         
         plot_2d(X_xz, Z_xz, H_mag_3D[:, y_idx, :].T, 
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
