@@ -3,21 +3,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import CenteredNorm
 from scipy.special import spherical_jn, spherical_yn, lpmv, factorial
+from scipy.linalg import block_diag
 
 #Plots
-XZ, YZ, DIAGONAL = True, False, False
+GEOMETRY, XZ, YZ, DIAGONAL = True, True, False, False
 PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
 
 #3D Gitter
-res = 51
+res = 41
 limit = 4e-6
 
 #Multipolordnung
-n_max = 1
+n_max = 2
 coeff_number = [0] + [2*i+1 for i in range(1, n_max+2)]
 coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+2)]
-print(coeff_number)
-print(coeff_sum)
+
 #Streusystem, theta [0, pi], chi [-pi, pi]
 c = 1.25e-6 
 h = 4
@@ -49,7 +49,6 @@ print('Polarisation:',p_x, p_y, p_z)
 epsilon_0 = 8.8541878188e-12
 mu_0 = 1.25663706127e-6
 c_0 = 299792458
-H_konst=(np.sqrt(epsilon_0*mu_0))/(1j*k*mu_0)
 
 
 #Kugelkoordinaten berechnen
@@ -114,46 +113,47 @@ r43, theta43, chi43 = inv_components(r34, theta34, chi34)
 
 
 #Plot des Tetraeders
-def plot_spherical_vectors(vectors):
-    fig = plt.figure(figsize=(8, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    colors = ['r', 'b', 'g', 'y']
-
-    for i, (r, theta, chi) in enumerate(vectors):
-        x_std = r * np.sin(theta) * np.cos(chi)
-        y_std = r * np.sin(theta) * np.sin(chi)
-        z_std = r * np.cos(theta)
-        
-        x_plot = y_std
-        y_plot = -x_std
-        z_plot = z_std
-        
-        ax.quiver(0, 0, 0, x_plot, y_plot, z_plot, color=colors[i % len(colors)], 
-                  label=f'r{i+1}', arrow_length_ratio=0.1)
-        
-    max_val = max([v[0] for v in vectors]) if vectors else 1
-    ax.set_xlim([-max_val, max_val])
-    ax.set_ylim([-max_val, max_val])
-    ax.set_zlim([-max_val, max_val])
+if GEOMETRY:
+    def plot_spherical_vectors(vectors):
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        colors = ['r', 'b', 'g', 'y']
     
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    ax.set_zticklabels([])
-
-    ax.set_xlabel('Y')
-    ax.set_ylabel('X')
-    ax.set_zlabel('Z')
-    ax.set_title('3D Vektoren aus Kugelkoordinaten')
-    ax.legend()
-    ax.view_init(elev=9, azim=-75) 
-    plt.show()
-
-v1 = (r1, theta1, chi1)
-v2 = (r2, theta2, chi2)
-v3 = (r3, theta3, chi3)
-v4 = (r4, theta4, chi4)
-
-plot_spherical_vectors([v1, v2, v3, v4])
+        for i, (r, theta, chi) in enumerate(vectors):
+            x_std = r * np.sin(theta) * np.cos(chi)
+            y_std = r * np.sin(theta) * np.sin(chi)
+            z_std = r * np.cos(theta)
+            
+            x_plot = y_std
+            y_plot = -x_std
+            z_plot = z_std
+            
+            ax.quiver(0, 0, 0, x_plot, y_plot, z_plot, color=colors[i % len(colors)], 
+                      label=f'r{i+1}', arrow_length_ratio=0.1)
+            
+        max_val = max([v[0] for v in vectors]) if vectors else 1
+        ax.set_xlim([-max_val, max_val])
+        ax.set_ylim([-max_val, max_val])
+        ax.set_zlim([-max_val, max_val])
+        
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.set_zticklabels([])
+    
+        ax.set_xlabel('Y')
+        ax.set_ylabel('X')
+        ax.set_zlabel('Z')
+        ax.set_title('3D Vektoren aus Kugelkoordinaten')
+        ax.legend()
+        ax.view_init(elev=9, azim=-75) 
+        plt.show()
+    
+    v1 = (r1, theta1, chi1)
+    v2 = (r2, theta2, chi2)
+    v3 = (r3, theta3, chi3)
+    v4 = (r4, theta4, chi4)
+    
+    plot_spherical_vectors([v1, v2, v3, v4])
 
 
 
@@ -209,13 +209,12 @@ def inv_T(a_q, n):
         g, f = coeff_sum[o-1], coeff_sum[o]
         dim = 2*o + 1
         
-        Z_phi = spherical_hn1(o, x)
-        N_phi = spherical_jn(o, x)
-        inv_T_phi = - Z_phi / N_phi
+        j_n,  dj_n  = spherical_jn(o, x), spherical_jn(o, x, derivative=True)
+        h_n, dh_n = spherical_hn1(o, x), d_spherical_hn1(o, x)
         
-        Z_psi = spherical_hn1(o, x) + x * d_spherical_hn1(o, x)
-        N_psi = spherical_jn(o, x) + x * spherical_jn(o, x, derivative=True)
-        inv_T_psi = - Z_psi / N_psi
+        inv_T_phi = - h_n / j_n
+        
+        inv_T_psi = - (h_n + x * dh_n) / (j_n + x * dj_n)
         
         T[g:f, g:f] = np.eye(dim) * inv_T_phi
         T[g+size:f+size, g+size:f+size] = np.eye(dim) * inv_T_psi
@@ -273,21 +272,13 @@ def RotQ(theta_pq, phi_pq, chi_pq, n_max):
     return Rot_Q
 
 
-def inv_RotQ(theta_pq, phi_pq, chi_pq, n_max):
-    return RotQ(theta_pq, phi_pq, chi_pq, n_max).conj().T
 
 
 
 
 
 
-
-
-
-
-
-
-#coaxiale Translationsoperatoren
+#koaxiale Translationsoperatoren
 def a_nm(n, m):
     cond = n >= np.abs(m)
     m = np.where(cond, m, 0)
@@ -323,26 +314,22 @@ def SR_coax_coeff(r_pq, n_max):
  
     return C[:, : lim + 1, :]
 
-# 2D-Matrix der korrekt angeordneten koaxialen Translationskoeffizienten (Dimension: coeff_sum[n_max+1]+1 x coeff_sum[n_max])
+
+# 2D-Matrix der koaxialen Translationskoeffizienten (Dimension: coeff_sum[n_max+1]+1 x coeff_sum[n_max])
 def SR_pq_coax(r_pq, n_max):
     C = SR_coax_coeff(r_pq, n_max)
     SR = np.zeros((coeff_sum[n_max+1], coeff_sum[n_max+1]), dtype=complex)
     
     for n in range(1, n_max+2):
-        s = list(range(n+1))
-        s_array = np.asarray(s)
         g, f = coeff_sum[n-1], coeff_sum[n]
         abs_m = np.concatenate([np.arange(n, -1, -1), np.arange(1, n + 1)])
-        diag_elements = np.array([C[val, n, n] for val in abs_m])
-        SR[g:f, g:f] = np.diag(diag_elements)
+        SR[g:f, g:f] = np.diag(C[abs_m, n, n])
       
         for j in range(1, n):
             g2, f2 = 0, coeff_number[j]
             abs_m2 = np.concatenate([np.arange(j, -1, -1), np.arange(1, j+1)])
-            elements_jn = np.array([C[val, j, n] for val in s_array[abs_m2]])
-            elements_nj = np.array([C[val, n, j] for val in s_array[abs_m2]])
-            SR[g2+coeff_sum[j-1]:f2+coeff_sum[j-1], g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j] = np.diag(elements_jn)
-            SR[g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j, g2+coeff_sum[j-1]:f2+coeff_sum[j-1]] = np.diag(elements_nj)
+            SR[g2+coeff_sum[j-1]:f2+coeff_sum[j-1], g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j] = np.diag(C[abs_m2, j, n])
+            SR[g2+coeff_sum[n-1]+n-j:f2+coeff_sum[n-1]+n-j, g2+coeff_sum[j-1]:f2+coeff_sum[j-1]] = np.diag(C[abs_m2, n, j])
       
     row0 = np.zeros(coeff_sum[n_max], dtype=complex)
     n_0 = np.arange(1, n_max + 1)
@@ -401,27 +388,21 @@ def C_11_coax(r_pq, n_max):
 
 
 
+
+
 def U_pq(r_pq, theta_pq, phi_pq, chi_pq, n_max):
+    C11 =  C_11_coax(r_pq, n_max)
+    C21 = C_21_coax(r_pq, n_max)
+    SR = SR_pq_coax(r_pq, n_max)
+    R = RotQ(theta_pq, phi_pq, chi_pq, n_max)
     
-    C_coax = np.block([[C_11_coax(r_pq, n_max), k**2 * C_21_coax(r_pq, n_max)],
-                       [C_21_coax(r_pq, n_max),        C_11_coax(r_pq, n_max)]])
-    
-    SR_coax = np.block([[SR_pq_coax(r_pq, n_max), np.zeros_like(SR_pq_coax(r_pq, n_max))],
-                        [np.zeros_like(SR_pq_coax(r_pq, n_max)), SR_pq_coax(r_pq, n_max)]])
-    
-    inv_RotQ1 = np.block([[inv_RotQ(theta_pq, phi_pq, chi_pq, n_max), np.zeros_like(inv_RotQ(theta_pq, phi_pq, chi_pq, n_max))],
-                        [np.zeros_like(inv_RotQ(theta_pq, phi_pq, chi_pq, n_max)), inv_RotQ(theta_pq, phi_pq, chi_pq, n_max)]])
-    
-    RotQ1 = np.block([[RotQ(theta_pq, phi_pq, chi_pq, n_max), np.zeros_like(RotQ(theta_pq, phi_pq, chi_pq, n_max))],
-                        [np.zeros_like(RotQ(theta_pq, phi_pq, chi_pq, n_max)), RotQ(theta_pq, phi_pq, chi_pq, n_max)]])
-    
+    RotQ1 = block_diag(R, R)
+    SR_coax = block_diag(SR, SR)
+    C_coax = np.block([[C11, k**2 * C21],
+                       [C21,        C11]])
+    inv_RotQ1 = RotQ1.conj().T
     
     return inv_RotQ1 @ C_coax @ SR_coax @ RotQ1
-
-
-
-
-
 
 
 
@@ -466,13 +447,10 @@ def c_nm(n, m):
     val = np.sqrt(rad)
     return np.where(m >= 0, val, -val)
 
-def nm_index(n_max):
-    n = np.concatenate([np.full(2*o+1, o) for o in range(1, n_max+1)])
-    m = np.concatenate([np.arange(-o, o+1) for o in range(1, n_max+1)])
-    return n.reshape(-1, 1), m.reshape(-1, 1)
         
-def y_q_inc(n):
-    n, m = nm_index(n)
+def y_q_inc(n_max):
+    n = np.concatenate([np.full(2*o+1, o) for o in range(1, n_max+1)]).reshape(-1, 1)
+    m = np.concatenate([np.arange(-o, o+1) for o in range(1, n_max+1)]).reshape(-1, 1)
 
     c_1 = c_nm(n, m)
     c_2 = c_nm(n, m-1)
@@ -515,14 +493,13 @@ def X(h):
 def abs_X(h):
     return np.abs(X(h))
 
-print(f"Radien der Kugeln: a1={a(h, 1):.1e} a2={a(h, 2):.1e} a3={a(h, 3):.1e} a4={a(h, 4):.1e} für h={h}")
-print('Produkt für Dipolnäherung: ka4=',k*a(h, 4))
-print(rf"X_{pol_mode}(h={h})=")
-print(X(h))
-
 X_val=X(h)
 X_flat = X_val.flatten()
+X1, X2, X3, X4 = np.split(X_flat, 4)
 
+print(f"Radien der Kugeln: a1={a(h, 1):.1e} a2={a(h, 2):.1e} a3={a(h, 3):.1e} a4={a(h, 4):.1e} für h={h}")
+print(rf"X_{pol_mode}(h={h})=")
+print(X_val)
 
 
 
@@ -530,48 +507,35 @@ X_flat = X_val.flatten()
 
 
 #Debye-Potentiale
-def S_m1_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, -1, theta_prime_p, chi_prime_p)
-def S_0_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, 0, theta_prime_p, chi_prime_p)
-def S_1_1(r_prime_p, theta_prime_p, chi_prime_p):
-    return spherical_hn1(1, k*r_prime_p)* Y_nm(1, 1, theta_prime_p, chi_prime_p)
+def S_nm(n, m, r, theta, chi):
+    return spherical_hn1(n, k*r) * Y_nm(n, m, theta, chi)
+
+def phi_scat_sphere(r, theta, chi, X_q):
+    val, idx = 0, 0
+    for n in range(1, n_max+1):
+        for m in range(-n, n+1):  
+            val = val + X_q[idx] * S_nm(n, m, r, theta, chi)
+            idx = idx +1
+    return val
+
+def psi_scat_sphere(r, theta, chi, X_q):
+    val, idx = 0, coeff_sum[n_max]
+    for n in range(1, n_max+1):
+        for m in range(-n, n+1):  
+            val = val + X_q[idx] * S_nm(n, m, r, theta, chi)
+            idx = idx +1
+    return val
 
 
-def phi_scat_sphere(r_prime, theta_prime, chi_prime, coeffs):
-    arg = (r_prime, theta_prime, chi_prime)
-    return coeffs[0]*S_m1_1(*arg) + coeffs[1]*S_0_1(*arg) + coeffs[2]*S_1_1(*arg)
-
-def psi_scat_sphere(r_prime, theta_prime, chi_prime, coeffs):
-    arg = (r_prime, theta_prime, chi_prime)
-    return coeffs[0]*S_m1_1(*arg) + coeffs[1]*S_0_1(*arg) + coeffs[2]*S_1_1(*arg)
 
 
-
-
-
-
-
-#Elektrische und magnetische Felder
-# ∇S_nm
-def grad_S_nm(n, m, r, theta, chi):
-    
-    grad_r = Y_nm(n, m, theta, chi) * k * d_spherical_hn1(n, k*r)
-    
-    grad_t = (1/r) * spherical_hn1(n, k*r) * dY_nm_dtheta(n, m, theta, chi)
-    
-    grad_c = (1/(r*np.sin(theta))) * spherical_hn1(n, k*r) * dY_nm_dchi(n, m, theta, chi)
-    
-    return grad_r, grad_t, grad_c
-
-
+#Elektrisches und magnetisches Feld
 # M_nm = ∇S_nm × r
 def M_nm(n, m, r, theta, chi):
-    grad_r, grad_t, grad_c = grad_S_nm(n, m, r, theta, chi)
     
     M_nm_r = np.zeros_like(r)
-    M_nm_t = grad_c * r
-    M_nm_c = - grad_t * r
+    M_nm_t = (1/(np.sin(theta))) * spherical_hn1(n, k*r) * dY_nm_dchi(n, m, theta, chi)
+    M_nm_c = - spherical_hn1(n, k*r) * dY_nm_dtheta(n, m, theta, chi)
     
     return np.array([M_nm_r, M_nm_t, M_nm_c])
 
@@ -587,48 +551,36 @@ def N_nm(n, m, r, theta, chi):
 
 
 
-# gestreutes E-Feld
-def E_scat_sphere(r_prime, theta_prime, chi_prime, coeffs):
-    M_nm_1_m1 = M_nm(1, -1, r_prime, theta_prime, chi_prime)
-    M_nm_1_0  = M_nm(1,  0, r_prime, theta_prime, chi_prime)
-    M_nm_1_1  = M_nm(1,  1, r_prime, theta_prime, chi_prime)
+def E_scat_sphere(r, theta, chi, X_q):
+    val, idx = 0,0
+    for n in range(1, n_max+1):
+        for m in range(-n, n+1):
+            val = val + (X_q[idx] * M_nm(n, m, r, theta, chi) + X_q[coeff_sum[n_max]+idx] * N_nm(n, m, r, theta, chi))
+            idx = idx + 1
+            
+    E_r, E_theta, E_chi = val
     
-    N_nm_1_m1 = N_nm(1, -1, r_prime, theta_prime, chi_prime)
-    N_nm_1_0  = N_nm(1,  0, r_prime, theta_prime, chi_prime)
-    N_nm_1_1  = N_nm(1,  1, r_prime, theta_prime, chi_prime)
-    
-    sum_phi_nm = coeffs[0]*M_nm_1_m1 + coeffs[1]*M_nm_1_0 + coeffs[2]*M_nm_1_1
-    sum_psi_nm = coeffs[3]*N_nm_1_m1 + coeffs[4]*N_nm_1_0 + coeffs[5]*N_nm_1_1
-    
-    E_r, E_theta, E_chi = sum_phi_nm + sum_psi_nm
-    
-    E_x = E_r * np.sin(theta_prime) * np.cos(chi_prime) + E_theta * np.cos(theta_prime) * np.cos(chi_prime) - E_chi * np.sin(chi_prime)
-    E_y = E_r * np.sin(theta_prime) * np.sin(chi_prime) + E_theta * np.cos(theta_prime) * np.sin(chi_prime) + E_chi * np.cos(chi_prime)
-    E_z = E_r * np.cos(theta_prime) - E_theta * np.sin(theta_prime)
+    E_x = E_r * np.sin(theta) * np.cos(chi) + E_theta * np.cos(theta) * np.cos(chi) - E_chi * np.sin(chi)
+    E_y = E_r * np.sin(theta) * np.sin(chi) + E_theta * np.cos(theta) * np.sin(chi) + E_chi * np.cos(chi)
+    E_z = E_r * np.cos(theta) - E_theta * np.sin(theta)
     
     return np.array([E_x, E_y, E_z])
 
 
 
 
-# gestreutes H-Feld
-def H_scat_sphere(r_prime, theta_prime, chi_prime, coeffs):
-    M_nm_1_m1 = M_nm(1, -1, r_prime, theta_prime, chi_prime)
-    M_nm_1_0  = M_nm(1,  0, r_prime, theta_prime, chi_prime)
-    M_nm_1_1  = M_nm(1,  1, r_prime, theta_prime, chi_prime)
+def H_scat_sphere(r, theta, chi, X_q):
+    val, idx = 0,0
+    for n in range(1, n_max+1):
+        for m in range(-n, n+1):
+            val = val + (k**2 * X_q[coeff_sum[n_max]+idx] * M_nm(n, m, r, theta, chi) + X_q[idx] * N_nm(n, m, r, theta, chi))
+            idx = idx + 1
     
-    N_nm_1_m1 = N_nm(1, -1, r_prime, theta_prime, chi_prime)
-    N_nm_1_0  = N_nm(1,  0, r_prime, theta_prime, chi_prime)
-    N_nm_1_1  = N_nm(1,  1, r_prime, theta_prime, chi_prime)
+    H_r, H_theta, H_chi = (np.sqrt(epsilon_0*mu_0))/(1j*k*mu_0) * val
     
-    sum_phi_nm = coeffs[0]*N_nm_1_m1 + coeffs[1]*N_nm_1_0 + coeffs[2]*N_nm_1_1
-    sum_psi_nm = coeffs[3]*M_nm_1_m1 + coeffs[4]*M_nm_1_0 + coeffs[5]*M_nm_1_1
-    
-    H_r, H_theta, H_chi = H_konst * (k**2 * sum_psi_nm + sum_phi_nm)
-    
-    H_x = H_r * np.sin(theta_prime) * np.cos(chi_prime) + H_theta * np.cos(theta_prime) * np.cos(chi_prime) - H_chi * np.sin(chi_prime)
-    H_y = H_r * np.sin(theta_prime) * np.sin(chi_prime) + H_theta * np.cos(theta_prime) * np.sin(chi_prime) + H_chi * np.cos(chi_prime)
-    H_z = H_r * np.cos(theta_prime) - H_theta * np.sin(theta_prime)
+    H_x = H_r * np.sin(theta) * np.cos(chi) + H_theta * np.cos(theta) * np.cos(chi) - H_chi * np.sin(chi)
+    H_y = H_r * np.sin(theta) * np.sin(chi) + H_theta * np.cos(theta) * np.sin(chi) + H_chi * np.cos(chi)
+    H_z = H_r * np.cos(theta) - H_theta * np.sin(theta)
     
     return np.array([H_x, H_y, H_z])
 
@@ -675,7 +627,7 @@ x_prime_1 = X_grid - x1
 y_prime_1 = Y_grid - y1
 z_prime_1 = Z_grid - z1
 r_prime_1_REAL = np.sqrt(x_prime_1**2 + y_prime_1**2 + z_prime_1**2)
-r_prime_1 = np.clip(r_prime_1_REAL, 3*a(h, 1), None)
+r_prime_1 = np.where(r_prime_1_REAL < a(h, 1), np.nan, r_prime_1_REAL)
 theta_prime_1 = np.arccos(np.clip(z_prime_1 / r_prime_1_REAL, -1.0, 1.0))
 chi_prime_1 = np.arctan2(y_prime_1, x_prime_1)
 
@@ -683,7 +635,7 @@ x_prime_2 = X_grid - x2
 y_prime_2 = Y_grid - y2
 z_prime_2 = Z_grid - z2
 r_prime_2_REAL = np.sqrt(x_prime_2**2 + y_prime_2**2 + z_prime_2**2)
-r_prime_2 = np.clip(r_prime_2_REAL, 3*a(h, 2), None)
+r_prime_2 = np.where(r_prime_2_REAL < a(h, 2), np.nan, r_prime_2_REAL)
 theta_prime_2 = np.arccos(np.clip(z_prime_2 / r_prime_2_REAL, -1.0, 1.0))
 chi_prime_2 = np.arctan2(y_prime_2, x_prime_2)
 
@@ -691,7 +643,7 @@ x_prime_3 = X_grid - x3
 y_prime_3 = Y_grid - y3
 z_prime_3 = Z_grid - z3
 r_prime_3_REAL = np.sqrt(x_prime_3**2 + y_prime_3**2 + z_prime_3**2)
-r_prime_3 = np.clip(r_prime_3_REAL, 3*a(h, 3), None)
+r_prime_3 = np.where(r_prime_3_REAL < a(h, 3), np.nan, r_prime_3_REAL)
 theta_prime_3 = np.arccos(np.clip(z_prime_3 / r_prime_3_REAL, -1.0, 1.0))
 chi_prime_3 = np.arctan2(y_prime_3, x_prime_3)
 
@@ -699,7 +651,7 @@ x_prime_4 = X_grid - x4
 y_prime_4 = Y_grid - y4
 z_prime_4 = Z_grid - z4
 r_prime_4_REAL = np.sqrt(x_prime_4**2 + y_prime_4**2 + z_prime_4**2)
-r_prime_4 = np.clip(r_prime_4_REAL, 3*a(h, 4), None)
+r_prime_4 = np.where(r_prime_4_REAL < a(h, 4), np.nan, r_prime_4_REAL)
 theta_prime_4 = np.arccos(np.clip(z_prime_4 / r_prime_4_REAL, -1.0, 1.0))
 chi_prime_4 = np.arctan2(y_prime_4, x_prime_4)
 
@@ -708,17 +660,17 @@ chi_prime_4 = np.arctan2(y_prime_4, x_prime_4)
 
 #Streupotentiale
 phi_scat_3D = sum([
-    phi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X_flat[0:3]),
-    phi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X_flat[6:9]),
-    phi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X_flat[12:15]),
-    phi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X_flat[18:21])
+    phi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
+    phi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
+    phi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
+    phi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)
 ])
 
 psi_scat_3D = sum([
-    psi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X_flat[3:6]),
-    psi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X_flat[9:12]),
-    psi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X_flat[15:18]),
-    psi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X_flat[21:24])
+    psi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
+    psi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
+    psi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
+    psi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)
 ])
 
 
@@ -726,19 +678,19 @@ psi_scat_3D = sum([
 
 #Felder
 E_scat = sum([
-    E_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X_flat[0:6]),
-    E_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X_flat[6:12]),
-    E_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X_flat[12:18]),
-    E_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X_flat[18:24])])
+    E_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
+    E_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
+    E_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
+    E_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)])
 
 E_mag_3D = np.sqrt(np.abs(E_scat[0])**2 + np.abs(E_scat[1])**2 + np.abs(E_scat[2])**2)
 
 
 H_scat = sum([
-    H_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X_flat[0:6]),
-    H_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X_flat[6:12]),
-    H_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X_flat[12:18]),
-    H_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X_flat[18:24])])
+    H_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
+    H_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
+    H_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
+    H_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)])
 
 H_mag_3D = np.sqrt(np.abs(H_scat[0])**2 + np.abs(H_scat[1])**2 + np.abs(H_scat[2])**2)
 
@@ -781,30 +733,6 @@ max_z = Z_grid[idx_x9, idx_y9, idx_z9]
 print(f'max(abs(Im_E_dot_H_star_3D)) = {Im_E_dot_H_star_max} für h = {h}')
 print(f'Ort des Maximums: x = {max_x:.4e}, y = {max_y:.4e}, z = {max_z:.4e}')
 print(f'Zugehörige Gitter-Indizes: [{idx_x9}, {idx_y9}, {idx_z9}]')
-
-
-
-
-#Streuamplitude und Wirkungsquerschnitt
-def f_q(z, k, coeffs):
-    phase = np.exp(-1j*k*z)
-    
-    f_x = 1j*1/k*coeffs[0] - 1j*1/k*coeffs[2] - 1j*coeffs[3] - 1j*coeffs[5]
-    f_y = 1/k*coeffs[0] + 1/k*coeffs[2] - coeffs[3] + coeffs[5]
-    f_z = 0
-    
-    return phase * np.sqrt(3/(8*np.pi)) * np.array([f_x, f_y, f_z])
-
-
-
-f = f_q(z1, k, X_flat[0:6]) + f_q(z2, k, X_flat[6:12]) + f_q(z3, k, X_flat[12:18]) + f_q(z4, k, X_flat[18:24])
-f_x, f_y, f_z = f
-
-
-sigma = (4*np.pi)/k * np.imag( np.conj(p_x)*f_x + np.conj(p_y)*f_y + np.conj(p_z)*f_z )
-
-
-print(f'Wirkungsquerschnitt: sigma = {sigma}')
 
 
 
