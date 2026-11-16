@@ -7,19 +7,19 @@ from scipy.linalg import block_diag
 
 #Plots
 GEOMETRY, XZ, YZ, DIAGONAL = True, True, False, False
-PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
+PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, True, True
 
 #3D Gitter
-res = 41
+res = 51
 limit = 4e-6
 
 #Multipolordnung
-n_max = 2
+n_max = 7
 coeff_number = [0] + [2*i+1 for i in range(1, n_max+2)]
 coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+2)]
 
 #Streusystem, theta [0, pi], chi [-pi, pi]
-c = 1.25e-6 
+c = 1.25e-6
 h = 4
 
 x1, y1, z1 = -c,  c, -c
@@ -741,9 +741,37 @@ print(f'Zugehörige Gitter-Indizes: [{idx_x9}, {idx_y9}, {idx_z9}]')
 
 
 
+#Streuamplitude und Wirkungsquerschnitt
+def f_q_n(z, k, X_q):
+    theta, chi = 1e-5, 0
+    f_r, f_theta, f_chi, idx = 0, 0, 0, 0
+    
+    for n in range(1, n_max+1):
+        for m in range(-n, n+1):
+            
+            t_phi = X_q[idx] * (1j**(-n-1))/k * 1/(np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)
+            t_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * dY_nm_dtheta(n, m, theta, chi)
+            
+            f_theta = f_theta + t_phi + t_psi
+            
+            c_phi = X_q[idx] * (1j**(-n-1))/k * (-dY_nm_dtheta(n, m, theta, chi))
+            c_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * 1/(np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)
+            
+            f_chi = f_chi + c_phi + c_psi
+            
+            idx = idx + 1
+            
+    f_x = f_theta * np.cos(chi) - f_chi * np.sin(chi)
+    f_y = f_theta * np.sin(chi) + f_chi * np.cos(chi)
+    f_z = f_r
+            
+    return np.exp(-1j*k*z) * np.array([f_x, f_y, f_z])
 
+f = f_q_n(z1, k, X1) + f_q_n(z2, k, X2) + f_q_n(z3, k, X3) + f_q_n(z4, k, X4)
+f_x, f_y, f_z = f     
 
-
+sigma = (4*np.pi)/k * np.imag( np.conj(p_x)*f_x + np.conj(p_y)*f_y + np.conj(p_z)*f_z )
+print(f'Wirkungsquerschnitt: sigma = {sigma}')
 
 
 
