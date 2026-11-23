@@ -6,15 +6,15 @@ from scipy.special import spherical_jn, spherical_yn, lpmv, factorial
 from scipy.linalg import block_diag
 
 #Plots
-GEOMETRY, XZ, YZ, DIAGONAL = True, True, False, False
-PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, True, True
+GEOMETRY, XZ, YZ, DIAGONAL = False, True, False, False
+PHI_PSI, E_H, Im_EH_tot, Im_EH_all = False, True, False, False
 
 #3D Gitter
-res = 51
+res = 31
 limit = 4e-6
 
 #Multipolordnung
-n_max = 7
+n_max = 20
 coeff_number = [0] + [2*i+1 for i in range(1, n_max+2)]
 coeff_sum = [sum(coeff_number[0:i+1]) for i in range(0, n_max+2)]
 
@@ -175,10 +175,7 @@ def Y_nm(n, m, theta, chi):
     abs_m = np.abs(m)
     norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
         
-    return (-1.0) ** m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
-
-def dY_nm_dchi(n, m, theta, chi):
-    return 1j * m * Y_nm(n, m, theta, chi)
+    return (-1.0)**m * norm * lpmv(abs_m, n, np.cos(theta)) * np.exp(1j * m * chi)
 
 def dY_nm_dtheta(n, m, theta, chi):
     abs_m = np.abs(m)
@@ -186,7 +183,7 @@ def dY_nm_dtheta(n, m, theta, chi):
     A = (n+abs_m)*(n-abs_m+1)
     dtheta_P_nm = 1/2* lpmv(abs_m+1, n, np.cos(theta))-1/2*A* lpmv(abs_m-1, n, np.cos(theta))
     
-    return (-1.0)**abs_m * norm * dtheta_P_nm * np.exp(1j * m * chi)
+    return (-1.0)**m * norm * dtheta_P_nm * np.exp(1j * m * chi)
 
 
 
@@ -200,28 +197,28 @@ def dY_nm_dtheta(n, m, theta, chi):
 
 
 #Mie Koeffizienten und T-Matrix
-def inv_T(a_q, n):
+def T(a_q, n):
     x = k * a_q
     size = coeff_sum[n]
     T = np.zeros((2*size, 2*size), dtype=complex)
     
     for o in range(1, n + 1):
         g, f = coeff_sum[o-1], coeff_sum[o]
-        dim = 2*o + 1
+        idx = np.arange(g, f)
         
         j_n,  dj_n  = spherical_jn(o, x), spherical_jn(o, x, derivative=True)
         h_n, dh_n = spherical_hn1(o, x), d_spherical_hn1(o, x)
         
-        inv_T_phi = - h_n / j_n
+        T_phi = - j_n / h_n
         
-        inv_T_psi = - (h_n + x * dh_n) / (j_n + x * dj_n)
+        T_psi = - (j_n + x * dj_n) / (h_n + x * dh_n)
         
-        T[g:f, g:f] = np.eye(dim) * inv_T_phi
-        T[g+size:f+size, g+size:f+size] = np.eye(dim) * inv_T_psi
+        T[idx, idx] = T_phi
+        T[idx + size, idx + size] = T_psi
         
     return T
 
-
+T1, T2, T3, T4 = T(a(h, 1), n_max), T(a(h, 2), n_max), T(a(h, 3), n_max), T(a(h, 4), n_max)
 
 
 
@@ -373,11 +370,11 @@ def C_11_coax(r_pq, n_max):
         m = np.arange(-n, n + 1)
         C_11[g:f, g:f] = np.eye(coeff_number[n])
         
-        B = (a_nm(n, m) * k * r_pq)/(n+1)
-        C_11[g:f, g+coeff_number[n]+1:f+coeff_number[n]+1] = np.diag(B)
+        BC = (a_nm(n, m) * k * r_pq)/(n+1)
         
-        C = (a_nm(n, m) * k * r_pq)/(n+1)
-        C_11[g+coeff_number[n]+1:f+coeff_number[n]+1, g:f] = np.diag(C)
+        C_11[g:f, g+coeff_number[n]+1:f+coeff_number[n]+1] = np.diag(BC)
+        
+        C_11[g+coeff_number[n]+1:f+coeff_number[n]+1, g:f] = np.diag(BC)
     
     column_0 = np.zeros((coeff_sum[n_max], 1), dtype=complex)
     column_0[1, 0] = (a_nm(0, 0) * k * r_pq)/(1)
@@ -426,12 +423,13 @@ U43 = U_pq(r43, theta43, 0, chi43, n_max)
 
 
 
-#Matrix L
-def L(h):
-    return np.block([[inv_T(a(h, 1), n_max),       -U21,       -U31,       -U41],
-                     [      -U12, inv_T(a(h, 2), n_max),       -U32,       -U42],
-                     [      -U13,       -U23, inv_T(a(h, 3), n_max),       -U43],
-                     [      -U14,       -U24,       -U34, inv_T(a(h, 4), n_max)]])
+#Matrix L = (I - T @ U)
+I = np.identity(T1.shape[0], dtype=complex)
+
+L = np.block([[         I, - T1 @ U21, - T1 @ U31, - T1 @ U41],
+              [- T2 @ U12,          I, - T2 @ U32, - T2 @ U42],
+              [- T3 @ U13, - T3 @ U23,          I, - T3 @ U43],
+              [- T4 @ U14, - T4 @ U24, - T4 @ U34,          I]])
 
 
  
@@ -440,7 +438,7 @@ def L(h):
 
 
 
-#Einfallende Welle Y für s = e_z
+#Einfallende Welle Y = T @ y für s = e_z
 def c_nm(n, m):
     cond = (m >= -n) & (m <= n)
     rad = np.where(cond, (n - m)*(n + m + 1), 0).astype(float)
@@ -472,28 +470,20 @@ y_q = y_q_inc(n_max)
 
 
 #Phasenfaktor 1 im globalen Ursprung
-def phase_factor(r, theta, chi):
-    x = r * np.sin(theta) * np.cos(chi)
-    y = r * np.sin(theta) * np.sin(chi)
-    z = r * np.cos(theta)
+def phase_factor(x, y, z):
     return np.exp(1j * k * (s_x * x + s_y * y + s_z * z))
 
-Y = np.block([[phase_factor(r1, theta1, chi1) * y_q],
-              [phase_factor(r2, theta2, chi2) * y_q],
-              [phase_factor(r3, theta3, chi3) * y_q],
-              [phase_factor(r4, theta4, chi4) * y_q]])
+Y = np.block([[phase_factor(x1, y1, z1) * T1 @ y_q],
+              [phase_factor(x2, y2, z2) * T2 @ y_q],
+              [phase_factor(x3, y3, z3) * T3 @ y_q],
+              [phase_factor(x4, y4, z4) * T4 @ y_q]])
 
 
 
 
 
-def X(h):
-    return np.linalg.solve(L(h), Y)
+X_val = np.linalg.solve(L, Y)
 
-def abs_X(h):
-    return np.abs(X(h))
-
-X_val=X(h)
 X_flat = X_val.flatten()
 X1, X2, X3, X4 = np.split(X_flat, 4)
 
@@ -506,99 +496,89 @@ print(X_val)
 
 
 
-#Debye-Potentiale
-def S_nm(n, m, r, theta, chi):
-    return spherical_hn1(n, k*r) * Y_nm(n, m, theta, chi)
 
-def phi_scat_sphere(r, theta, chi, X_q):
-    val, idx = 0, 0
+
+#Debye-Potentiale und Elektrisches & magnetisches Feld
+# S_nm = h_n * Y_nm,   M_nm = ∇S_nm × r,    N_nm = ∇ × M_nm
+# E = 𝚺 φ_nm * M_nm + ψ_nm * N_nm,    H = 1/iωμ * 𝚺 k**2 * ψ_nm * M_nm + φ_nm * N_nm
+
+def potentials_fields_scat_q(r, theta, chi, X_q):
+    phi, psi, E_r, E_t, E_c, H_r, H_t, H_c, idx = 0, 0, 0, 0, 0, 0, 0, 0, 0
+    offset = coeff_sum[n_max]
+    x = k*r
+    sin_t, sin_c = np.sin(theta), np.sin(chi)
+    cos_t, cos_c = np.cos(theta), np.cos(chi)
+    inv_r, inv_sin_t = 1/r, 1/sin_t
+    H_const = (np.sqrt(epsilon_0 * mu_0)) / (1j * k * mu_0)
+    
     for n in range(1, n_max+1):
-        for m in range(-n, n+1):  
-            val = val + X_q[idx] * S_nm(n, m, r, theta, chi)
-            idx = idx +1
-    return val
-
-def psi_scat_sphere(r, theta, chi, X_q):
-    val, idx = 0, coeff_sum[n_max]
-    for n in range(1, n_max+1):
-        for m in range(-n, n+1):  
-            val = val + X_q[idx] * S_nm(n, m, r, theta, chi)
-            idx = idx +1
-    return val
-
-
-
-
-#Elektrisches und magnetisches Feld
-# M_nm = ∇S_nm × r
-def M_nm(n, m, r, theta, chi):
-    
-    M_nm_r = np.zeros_like(r)
-    M_nm_t = (1/(np.sin(theta))) * spherical_hn1(n, k*r) * dY_nm_dchi(n, m, theta, chi)
-    M_nm_c = - spherical_hn1(n, k*r) * dY_nm_dtheta(n, m, theta, chi)
-    
-    return np.array([M_nm_r, M_nm_t, M_nm_c])
-
-
-# N_nm = ∇ × M_nm
-def N_nm(n, m, r, theta, chi):
-    
-    N_nm_r = (n * (n + 1) / r) * spherical_hn1(n, k*r) * Y_nm(n, m, theta, chi)
-    N_nm_t = (1/r)*dY_nm_dtheta(n, m, theta, chi)*(spherical_hn1(n, k*r) + k*r*d_spherical_hn1(n, k*r))
-    N_nm_c = 1/(r*np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)*(spherical_hn1(n, k*r) + k*r*d_spherical_hn1(n, k*r))
-    
-    return np.array([N_nm_r, N_nm_t, N_nm_c])
-
-
-
-def E_scat_sphere(r, theta, chi, X_q):
-    val, idx = 0,0
-    for n in range(1, n_max+1):
+        h_n = spherical_hn1(n, x)
+        dh_n = (n*spherical_hn1(n-1, x) - (n+1) * spherical_hn1(n+1, x)) / (2*n+1)
+        P  = {j: lpmv(j, n, cos_t) for j in range(-1, n + 2)}
+        dP = {j: 1/2 * P[j+1] - 1/2 * (n + j) * (n - j + 1) * P[j-1] for j in range(0, n + 1)}
+        a = (n * (n + 1) / r)
+        
         for m in range(-n, n+1):
-            val = val + (X_q[idx] * M_nm(n, m, r, theta, chi) + X_q[coeff_sum[n_max]+idx] * N_nm(n, m, r, theta, chi))
+            abs_m = np.abs(m)
+            norm = np.sqrt(((2*n + 1)/(4*np.pi)) * (factorial(n - abs_m)/factorial(n + abs_m)))
+            exp_chi = np.exp(1j * m * chi)
+            Y_n_m = (-1.0)**m * norm * P[abs_m] * exp_chi
+            dY_dchi = 1j * m * Y_n_m
+            dY_dtheta = (-1.0)**m * norm * dP[abs_m] * exp_chi
+            
+            X_q_phi = X_q[idx]
+            X_q_psi = X_q[offset+idx]
+            
+            S_nm = h_n * Y_n_m
+            
+            phi += X_q_phi * S_nm
+            psi += X_q_psi * S_nm
+            
+            M_nm_t = inv_sin_t * h_n * dY_dchi
+            M_nm_c = -h_n * dY_dtheta
+            
+            N_nm_r = a * h_n * Y_n_m
+            N_nm_t = inv_r * dY_dtheta * (h_n + x*dh_n)
+            N_nm_c = inv_r * inv_sin_t * dY_dchi * (h_n + x*dh_n)
+            
+            E_r += X_q_psi * N_nm_r
+            E_t += X_q_phi * M_nm_t + X_q_psi * N_nm_t
+            E_c += X_q_phi * M_nm_c + X_q_psi * N_nm_c
+            
+            H_r += H_const * (X_q_phi * N_nm_r)
+            H_t += H_const * (k**2 * X_q_psi * M_nm_t + X_q_phi * N_nm_t)
+            H_c += H_const * (k**2 * X_q_psi * M_nm_c + X_q_phi * N_nm_c)
+            
             idx = idx + 1
             
-    E_r, E_theta, E_chi = val
+    E_x = E_r * sin_t * cos_c + E_t * cos_t * cos_c - E_c * sin_c
+    E_y = E_r * sin_t * sin_c + E_t * cos_t * sin_c + E_c * cos_c
+    E_z = E_r * cos_t - E_t * sin_t
     
-    E_x = E_r * np.sin(theta) * np.cos(chi) + E_theta * np.cos(theta) * np.cos(chi) - E_chi * np.sin(chi)
-    E_y = E_r * np.sin(theta) * np.sin(chi) + E_theta * np.cos(theta) * np.sin(chi) + E_chi * np.cos(chi)
-    E_z = E_r * np.cos(theta) - E_theta * np.sin(theta)
+    H_x = H_r * sin_t * cos_c + H_t * cos_t * cos_c - H_c * sin_c
+    H_y = H_r * sin_t * sin_c + H_t * cos_t * sin_c + H_c * cos_c
+    H_z = H_r * cos_t - H_t * sin_t
     
-    return np.array([E_x, E_y, E_z])
+    return phi, psi, np.array([E_x, E_y, E_z]), np.array([H_x, H_y, H_z])
 
 
-
-
-def H_scat_sphere(r, theta, chi, X_q):
-    val, idx = 0,0
-    for n in range(1, n_max+1):
-        for m in range(-n, n+1):
-            val = val + (k**2 * X_q[coeff_sum[n_max]+idx] * M_nm(n, m, r, theta, chi) + X_q[idx] * N_nm(n, m, r, theta, chi))
-            idx = idx + 1
-    
-    H_r, H_theta, H_chi = (np.sqrt(epsilon_0*mu_0))/(1j*k*mu_0) * val
-    
-    H_x = H_r * np.sin(theta) * np.cos(chi) + H_theta * np.cos(theta) * np.cos(chi) - H_chi * np.sin(chi)
-    H_y = H_r * np.sin(theta) * np.sin(chi) + H_theta * np.cos(theta) * np.sin(chi) + H_chi * np.cos(chi)
-    H_z = H_r * np.cos(theta) - H_theta * np.sin(theta)
-    
-    return np.array([H_x, H_y, H_z])
-
+ 
 
 
 #Einfallende Felder für s = e_z
-def E_inc_func(q_x, q_y, k, z):
-    E_inc_x = -q_y * np.exp(1j*k*z)
-    E_inc_y = q_x * np.exp(1j*k*z)
+def fields_inc(q_x, q_y, k, z):
+    phase = np.exp(1j*k*z)
+    const = 1/(c_0 * mu_0)
+    
+    E_inc_x = -q_y * phase
+    E_inc_y = q_x * phase
     E_inc_z = np.zeros_like(E_inc_x)
-    return np.array([E_inc_x, E_inc_y, E_inc_z])
-
-def H_inc_func(q_x, q_y, k, z):
-    H_inc_x = -q_x * np.exp(1j*k*z) * 1/(c_0 * mu_0)
-    H_inc_y = -q_y * np.exp(1j*k*z) * 1/(c_0 * mu_0)
+    
+    H_inc_x = -q_x * phase * const
+    H_inc_y = -q_y * phase * const
     H_inc_z = np.zeros_like(H_inc_x)
-    return np.array([H_inc_x, H_inc_y, H_inc_z])
-
+    
+    return np.array([E_inc_x, E_inc_y, E_inc_z]), np.array([H_inc_x, H_inc_y, H_inc_z])
 
 
 
@@ -615,13 +595,6 @@ z_range = np.linspace(-limit, limit, res)
 # 'ij' indexing sorgt dafür, dass X_grid[i,j,k] zu x_range[i] gehört
 X_grid, Y_grid, Z_grid = np.meshgrid(x_range, y_range, z_range, indexing='ij')
 
-
-
-r = np.sqrt(X_grid**2 + Y_grid**2 + Z_grid**2)
-# Fangen von Division durch Null bei r=0, falls nötig
-with np.errstate(divide='ignore', invalid='ignore'):
-    theta = np.arccos(np.clip(Z_grid / r, -1.0, 1.0))
-    chi = np.arctan2(Y_grid, X_grid)
 
 x_prime_1 = X_grid - x1
 y_prime_1 = Y_grid - y1
@@ -657,50 +630,27 @@ chi_prime_4 = np.arctan2(y_prime_4, x_prime_4)
 
 
 
-
-#Streupotentiale
-phi_scat_3D = sum([
-    phi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
-    phi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
-    phi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
-    phi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)
-])
-
-psi_scat_3D = sum([
-    psi_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
-    psi_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
-    psi_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
-    psi_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)
-])
+#Streupotentiale und Felder
+phi_scat1, psi_scat1, E_scat1, H_scat1 = potentials_fields_scat_q(r_prime_1, theta_prime_1, chi_prime_1, X1)
+phi_scat2, psi_scat2, E_scat2, H_scat2 = potentials_fields_scat_q(r_prime_2, theta_prime_2, chi_prime_2, X2)
+phi_scat3, psi_scat3, E_scat3, H_scat3 = potentials_fields_scat_q(r_prime_3, theta_prime_3, chi_prime_3, X3)
+phi_scat4, psi_scat4, E_scat4, H_scat4 = potentials_fields_scat_q(r_prime_4, theta_prime_4, chi_prime_4, X4)
 
 
+phi_scat = phi_scat1 + phi_scat2 + phi_scat3 + phi_scat4
+psi_scat = psi_scat1 + psi_scat2 + psi_scat3 + psi_scat4
 
 
-#Felder
-E_scat = sum([
-    E_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
-    E_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
-    E_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
-    E_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)])
+E_scat = E_scat1 + E_scat2 + E_scat3 + E_scat4
+H_scat = H_scat1 + H_scat2 + H_scat3 + H_scat4
 
 E_mag_3D = np.sqrt(np.abs(E_scat[0])**2 + np.abs(E_scat[1])**2 + np.abs(E_scat[2])**2)
-
-
-H_scat = sum([
-    H_scat_sphere(r_prime_1, theta_prime_1, chi_prime_1, X1),
-    H_scat_sphere(r_prime_2, theta_prime_2, chi_prime_2, X2),
-    H_scat_sphere(r_prime_3, theta_prime_3, chi_prime_3, X3),
-    H_scat_sphere(r_prime_4, theta_prime_4, chi_prime_4, X4)])
-
 H_mag_3D = np.sqrt(np.abs(H_scat[0])**2 + np.abs(H_scat[1])**2 + np.abs(H_scat[2])**2)
 
 
-E_inc = E_inc_func(q_x, q_y, k, Z_grid)
-H_inc = H_inc_func(q_x, q_y, k, Z_grid)
+E_inc, H_inc = fields_inc(q_x, q_y, k, Z_grid)
 
-
-E_tot = E_scat + E_inc
-H_tot = H_scat + H_inc
+E_tot, H_tot = E_scat + E_inc, H_scat + H_inc
 
 
 
@@ -748,14 +698,16 @@ def f_q_n(z, k, X_q):
     
     for n in range(1, n_max+1):
         for m in range(-n, n+1):
+            dY_dchi = 1j * m * Y_nm(n, m, theta, chi)
+            dY_dtheta = dY_nm_dtheta(n, m, theta, chi)
             
-            t_phi = X_q[idx] * (1j**(-n-1))/k * 1/(np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)
-            t_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * dY_nm_dtheta(n, m, theta, chi)
+            t_phi = X_q[idx] * (1j**(-n-1))/k * 1/(np.sin(theta)) * dY_dchi
+            t_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * dY_dtheta
             
             f_theta = f_theta + t_phi + t_psi
             
-            c_phi = X_q[idx] * (1j**(-n-1))/k * (-dY_nm_dtheta(n, m, theta, chi))
-            c_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * 1/(np.sin(theta)) * dY_nm_dchi(n, m, theta, chi)
+            c_phi = X_q[idx] * (1j**(-n-1))/k * (-dY_dtheta)
+            c_psi = X_q[coeff_sum[n_max] + idx] * 1j**(-n) * 1/(np.sin(theta)) * dY_dchi
             
             f_chi = f_chi + c_phi + c_psi
             
@@ -802,47 +754,47 @@ if XZ:
     xl, yl = '$x$ (m)', '$z$ (m)'
     
     if PHI_PSI:
-        plot_2d(X_xz, Z_xz, np.abs(phi_scat_3D[:, y_idx, :]).T, 
+        plot_2d(X_xz, Z_xz, np.abs(phi_scat[:, y_idx, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
+                xl, yl, r'|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
         
-        plot_2d(X_xz, Z_xz, np.abs(psi_scat_3D[:, y_idx, :]).T, 
+        plot_2d(X_xz, Z_xz, np.abs(psi_scat[:, y_idx, :]).T, 
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
+                xl, yl, r'|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
 
     if E_H:
         plot_2d(X_xz, Z_xz, E_mag_3D[:, y_idx, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
+                xl, yl, r'|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
         
         
         plot_2d(X_xz, Z_xz, H_mag_3D[:, y_idx, :].T, 
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
+                xl, yl, r'|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
 
     if Im_EH_tot:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
         
 
     if Im_EH_all:
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_inc[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_scat[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
         
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_mixed1[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
         
         plot_2d(X_xz, Z_xz, Im_E_dot_H_star_mixed2[:, y_idx, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) in x-z (y={y_xz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
 
 
 
@@ -856,44 +808,44 @@ if YZ:
     xl, yl = '$y$ (m)', '$z$ (m)'
 
     if PHI_PSI:
-        plot_2d(Y_yz, Z_yz, np.abs(phi_scat_3D[x_idx, :, :]).T, 
+        plot_2d(Y_yz, Z_yz, np.abs(phi_scat[x_idx, :, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
+                xl, yl, r'|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis')
         
-        plot_2d(Y_yz, Z_yz, np.abs(psi_scat_3D[x_idx, :, :]).T, 
+        plot_2d(Y_yz, Z_yz, np.abs(psi_scat[x_idx, :, :]).T, 
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
+                xl, yl, r'|$\psi_{\mathrm{scat}}$| (V)', 'cividis')
 
     if E_H:
         plot_2d(Y_yz, Z_yz, E_mag_3D[x_idx, :, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
+                xl, yl, r'|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis')
         
         plot_2d(Y_yz, Z_yz, H_mag_3D[x_idx, :, :].T, 
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
+                xl, yl, r'|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis')
 
     if Im_EH_tot:
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
     if Im_EH_all:
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star_inc[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma')
         
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star_scat[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
         
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star_mixed1[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
         
         plot_2d(Y_yz, Z_yz, Im_E_dot_H_star_mixed2[x_idx, :, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) in y-z (x={x_yz:.1e} m), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm())
 
 
 
@@ -910,41 +862,41 @@ if DIAGONAL:
     fig_sz = (8, 4.5)
 
     if PHI_PSI:
-        plot_2d(D_diag, Z_diag, np.abs(phi_scat_3D[indices, indices, :]).T, 
+        plot_2d(D_diag, Z_diag, np.abs(phi_scat[indices, indices, :]).T, 
                 fr'{pol_mode}: |$\phi_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
-                xl, yl, '|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis', figsize=fig_sz)
+                xl, yl, r'|$\phi_{\mathrm{scat}}$| (V/m)', 'cividis', figsize=fig_sz)
         
-        plot_2d(D_diag, Z_diag, np.abs(psi_scat_3D[indices, indices, :]).T, 
+        plot_2d(D_diag, Z_diag, np.abs(psi_scat[indices, indices, :]).T, 
                 fr'{pol_mode}: |$\psi_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
-                xl, yl, '|$\psi_{\mathrm{scat}}$| (V)', 'cividis', figsize=fig_sz)
+                xl, yl, r'|$\psi_{\mathrm{scat}}$| (V)', 'cividis', figsize=fig_sz)
 
     if E_H:
         plot_2d(D_diag, Z_diag, E_mag_3D[indices, indices, :].T, 
                 fr'{pol_mode}: |$\mathbf{{E}}_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
-                xl, yl, '|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis', figsize=fig_sz)
+                xl, yl, r'|$\mathbf{E}_{\mathrm{scat}}$| (V/m)', 'viridis', figsize=fig_sz)
         plot_2d(D_diag, Z_diag, H_mag_3D[indices, indices, :].T, 
                 fr'{pol_mode}: |$\mathbf{{H}}_{{\mathrm{{scat}}}}$| (x=y), h={h}', 
-                xl, yl, '|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis', figsize=fig_sz)
+                xl, yl, r'|$\mathbf{H}_{\mathrm{scat}}$| (A/m)', 'viridis', figsize=fig_sz)
 
     if Im_EH_tot:
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{tot}}}} \cdot \mathbf{{H}}_{{\mathrm{{tot}}}}^*$) (x=y), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
         
     if Im_EH_all:
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star_inc[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) (x=y), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', figsize=fig_sz)
         
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star_scat[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) (x=y), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
         
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star_mixed1[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{scat}}}} \cdot \mathbf{{H}}_{{\mathrm{{inc}}}}^*$) (x=y), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
         
         plot_2d(D_diag, Z_diag, Im_E_dot_H_star_mixed2[indices, indices, :].T, 
                 fr'{pol_mode}: Im($\mathbf{{E}}_{{\mathrm{{inc}}}} \cdot \mathbf{{H}}_{{\mathrm{{scat}}}}^*$) (x=y), h={h}', 
-                xl, yl, 'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
+                xl, yl, r'Im($\mathbf{E} \cdot \mathbf{H}^*$) (W/m²)', 'plasma', norm=CenteredNorm(), figsize=fig_sz)
 
